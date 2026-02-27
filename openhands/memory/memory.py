@@ -45,7 +45,7 @@ class Memory:
 
     sid: str
     event_stream: EventStream
-    status_callback: Callable | None
+    status_callback: Callable[[str, RuntimeStatus, str], None] | None
     loop: asyncio.AbstractEventLoop | None
     repo_microagents: dict[str, RepoMicroagent]
     knowledge_microagents: dict[str, KnowledgeMicroagent]
@@ -54,7 +54,7 @@ class Memory:
         self,
         event_stream: EventStream,
         sid: str,
-        status_callback: Callable | None = None,
+        status_callback: Callable[[str, RuntimeStatus, str], None] | None = None,
     ):
         self.event_stream = event_stream
         self.sid = sid if sid else str(uuid.uuid4())
@@ -184,11 +184,10 @@ class Memory:
                 else '',
                 repo_instructions=repo_instructions if repo_instructions else '',
                 runtime_hosts=self.runtime_info.available_hosts
-                if self.runtime_info and self.runtime_info.available_hosts is not None
+                if self.runtime_info and self.runtime_info.available_hosts
                 else {},
                 additional_agent_instructions=self.runtime_info.additional_agent_instructions
-                if self.runtime_info
-                and self.runtime_info.additional_agent_instructions is not None
+                if self.runtime_info and self.runtime_info.additional_agent_instructions
                 else '',
                 microagent_knowledge=microagent_knowledge,
                 content='Added workspace context',
@@ -370,7 +369,7 @@ class Memory:
             try:
                 if self.loop is None:
                     self.loop = asyncio.get_running_loop()
-                asyncio.run_coroutine_threadsafe(
+                _ = asyncio.run_coroutine_threadsafe(
                     self._set_runtime_status('error', status, message), self.loop
                 )
             except (RuntimeError, KeyError) as e:

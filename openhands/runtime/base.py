@@ -19,6 +19,7 @@ from openhands.core.config import OpenHandsConfig, SandboxConfig
 from openhands.core.config.mcp_config import MCPConfig, MCPStdioServerConfig
 from openhands.core.exceptions import (
     AgentRuntimeDisconnectedError,
+    AgentRuntimeTimeoutError,
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.events import EventSource, EventStream, EventStreamSubscriber
@@ -379,6 +380,10 @@ class Runtime(FileEditRuntimeMixin):
                 observation = await call_sync_from_async(self.run_action, event)
         except PermissionError as e:
             # Handle PermissionError specially - convert to ErrorObservation
+            # so the agent can receive feedback and continue execution
+            observation = ErrorObservation(content=str(e))
+        except AgentRuntimeTimeoutError as e:
+            # Handle timeout errors - convert to ErrorObservation
             # so the agent can receive feedback and continue execution
             observation = ErrorObservation(content=str(e))
         except (httpx.NetworkError, AgentRuntimeDisconnectedError) as e:

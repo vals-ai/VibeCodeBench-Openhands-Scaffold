@@ -97,7 +97,7 @@ def _convert_pydantic_to_dict(obj: BaseModel | dict) -> dict:
     return obj
 
 
-def event_to_dict(event: 'Event') -> dict:
+def event_to_dict(event: 'Event') -> dict[str, Any]:
     props = asdict(event)
     d = {}
     for key in TOP_KEYS:

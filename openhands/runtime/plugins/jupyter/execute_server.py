@@ -121,9 +121,15 @@ class JupyterKernel:
         ws_req = HTTPRequest(
             url='{}/api/kernels/{}/channels'.format(
                 self.base_ws_url, url_escape(self.kernel_id)
-            )
+            ),
+            connect_timeout=30,
         )
-        self.ws = await websocket_connect(ws_req)
+
+        @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+        async def connect_ws():
+            return await websocket_connect(ws_req)
+
+        self.ws = await connect_ws()
         logging.info('Connected to kernel websocket')
 
         # Setup heartbeat

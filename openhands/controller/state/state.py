@@ -4,8 +4,9 @@ import base64
 import os
 import pickle
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from typing import Any, override
+
+from model_library.base import InputItem, ToolCall
 
 import openhands
 from openhands.controller.state.control_flags import (
@@ -14,13 +15,13 @@ from openhands.controller.state.control_flags import (
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.schema import AgentState
-from openhands.events.action import (
-    MessageAction,
-)
-from openhands.events.action.agent import AgentFinishAction
-from openhands.events.event import Event, EventSource
+from openhands.events.action.agent import ChangeAgentStateAction
+from openhands.events.action.empty import NullAction
+from openhands.events.event import Event
+from openhands.events.event_filter import EventFilter
+from openhands.events.observation.agent import AgentStateChangedObservation
+from openhands.events.observation.empty import NullObservation
 from openhands.llm.metrics import Metrics
-from openhands.memory.view import View
 from openhands.server.services.conversation_stats import ConversationStats
 from openhands.storage.files import FileStore
 from openhands.storage.locations import get_conversation_agent_state_filename
@@ -31,18 +32,6 @@ RESUMABLE_STATES = [
     AgentState.AWAITING_USER_INPUT,
     AgentState.FINISHED,
 ]
-
-
-# NOTE: this is deprecated
-class TrafficControlState(str, Enum):
-    # default state, no rate limiting
-    NORMAL = 'normal'
-
-    # task paused due to traffic control
-    THROTTLING = 'throttling'
-
-    # traffic control is temporarily paused
-    PAUSED = 'paused'
 
 
 @dataclass
@@ -88,9 +77,10 @@ class State:
     conversation_stats: ConversationStats | None = None
     budget_flag: BudgetControlFlag | None = None
     confirmation_mode: bool = False
-    history: list[Event] = field(default_factory=list)
-    inputs: dict = field(default_factory=dict)
-    outputs: dict = field(default_factory=dict)
+    inputs: list[InputItem] = field(default_factory=list)
+    outputs: dict[str, Any] = field(default_factory=dict)
+
+    pending_tool_calls: dict[str, ToolCall] = field(default_factory=dict)
     agent_state: AgentState = AgentState.LOADING
     resume_state: AgentState | None = None
 
@@ -107,15 +97,6 @@ class State:
     # evaluation tasks to store extra data needed to track the progress/state of the task.
     extra_data: dict[str, Any] = field(default_factory=dict)
     last_error: str = ''
-
-    # NOTE: deprecated args, kept here temporarily for backwards compatability
-    # Will be remove in 30 days
-    iteration: int | None = None
-    local_iteration: int | None = None
-    max_iterations: int | None = None
-    traffic_control_state: TrafficControlState | None = None
-    local_metrics: Metrics | None = None
-    delegates: dict[tuple[int, int], tuple[str, str]] | None = None
 
     metrics: Metrics = field(default_factory=Metrics)
 
@@ -149,7 +130,7 @@ class State:
     @staticmethod
     def restore_from_session(
         sid: str, file_store: FileStore, user_id: str | None = None
-    ) -> 'State':
+    ) -> State:
         """Restores the state from the previously saved session."""
         state: State
         try:
@@ -169,7 +150,7 @@ class State:
             else:
                 raise FileNotFoundError(
                     f'Could not restore state from session file for sid: {sid}'
-                )
+                ) from None
         except Exception as e:
             logger.debug(f'Could not restore state from session: {e}')
             raise e
@@ -188,52 +169,14 @@ class State:
 
         return state
 
-    def __getstate__(self) -> dict:
-        # don't pickle history, it will be restored from the event stream
+    @override
+    def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
-        state['history'] = []
-
-        # Remove any view caching attributes. They'll be rebuilt frmo the
-        # history after that gets reloaded.
-        state.pop('_history_checksum', None)
-        state.pop('_view', None)
-
-        # Remove deprecated fields before pickling
-        state.pop('iteration', None)
-        state.pop('local_iteration', None)
-        state.pop('max_iterations', None)
-        state.pop('traffic_control_state', None)
-        state.pop('local_metrics', None)
-        state.pop('delegates', None)
-
         return state
 
-    def __setstate__(self, state: dict) -> None:
-        # Check if we're restoring from an older version (before control flags)
-        is_old_version = 'iteration' in state
-
-        # Convert old iteration tracking to new iteration_flag if needed
-        if is_old_version:
-            # Create iteration_flag from old values
-            max_iterations = state.get('max_iterations', 100)
-            current_iteration = state.get('iteration', 0)
-
-            # Add the iteration_flag to the state
-            state['iteration_flag'] = IterationControlFlag(
-                limit_increase_amount=max_iterations,
-                current_value=current_iteration,
-                max_value=max_iterations,
-            )
-
+    def __setstate__(self, state: dict[str, Any]) -> None:
         # Update the state
         self.__dict__.update(state)
-
-        # We keep the deprecated fields for backward compatibility
-        # They will be removed by __getstate__ when the state is saved again
-
-        # make sure we always have the attribute history
-        if not hasattr(self, 'history'):
-            self.history = []
 
         # Ensure we have default values for new fields if they're missing
         if not hasattr(self, 'iteration_flag'):
@@ -244,44 +187,21 @@ class State:
         if not hasattr(self, 'budget_flag'):
             self.budget_flag = None
 
-    def get_current_user_intent(self) -> tuple[str | None, list[str] | None]:
-        """Returns the latest user message and image(if provided) that appears after a FinishAction, or the first (the task) if nothing was finished yet."""
-        last_user_message = None
-        last_user_message_image_urls: list[str] | None = []
-        for event in reversed(self.view):
-            if isinstance(event, MessageAction) and event.source == 'user':
-                last_user_message = event.content
-                last_user_message_image_urls = event.image_urls
-            elif isinstance(event, AgentFinishAction):
-                if last_user_message is not None:
-                    return last_user_message, None
-
-        return last_user_message, last_user_message_image_urls
-
-    def get_last_agent_message(self) -> MessageAction | None:
-        for event in reversed(self.view):
-            if isinstance(event, MessageAction) and event.source == EventSource.AGENT:
-                return event
-        return None
-
-    def get_last_user_message(self) -> MessageAction | None:
-        for event in reversed(self.view):
-            if isinstance(event, MessageAction) and event.source == EventSource.USER:
-                return event
-        return None
-
-    def to_llm_metadata(self, model_name: str, agent_name: str) -> dict:
+    def to_llm_metadata(self, model_name: str, agent_name: str) -> dict[str, Any]:
         metadata = {
             'session_id': self.session_id,
             'trace_version': openhands.__version__,
             'trace_user_id': self.user_id,
-            'tags': [
-                f'model:{model_name}',
-                f'agent:{agent_name}',
-                f'web_host:{os.environ.get("WEB_HOST", "unspecified")}',
-                f'openhands_version:{openhands.__version__}',
-            ],
+            'tags': ','.join(
+                [
+                    f'model:{model_name}',
+                    f'agent:{agent_name}',
+                    f'web_host:{os.environ.get("WEB_HOST", "unspecified")}',
+                    f'openhands_version:{openhands.__version__}',
+                ]
+            ),
         }
+
         return metadata
 
     def get_local_step(self):
@@ -295,17 +215,38 @@ class State:
             return self.metrics
         return self.metrics.diff(self.parent_metrics_snapshot)
 
-    @property
-    def view(self) -> View:
-        # Compute a simple checksum from the history to see if we can re-use any
-        # cached view.
-        history_checksum = len(self.history)
-        old_history_checksum = getattr(self, '_history_checksum', -1)
+    def get_history_from_stream(self, event_stream: Any) -> list[Event]:
+        """Fetch history from event_stream for compatibility with legacy code.
 
-        # If the history has changed, we need to re-create the view and update
-        # the caching.
-        if history_checksum != old_history_checksum:
-            self._history_checksum = history_checksum
-            self._view = View.from_events(self.history)
+        Args:
+            event_stream: The EventStream to query
 
-        return self._view
+        Returns:
+            List of filtered events
+        """
+
+        agent_history_filter = EventFilter(
+            exclude_types=(
+                NullAction,
+                NullObservation,
+                ChangeAgentStateAction,
+                AgentStateChangedObservation,
+            ),
+            exclude_hidden=True,
+        )
+
+        start_id = self.start_id if self.start_id >= 0 else 0
+        end_id = self.end_id if self.end_id >= 0 else event_stream.get_latest_event_id()
+
+        return list(
+            event_stream.search_events(
+                start_id=start_id,
+                end_id=end_id,
+                reverse=False,
+                filter=agent_history_filter,
+            )
+        )
+
+    def flush(self) -> None:
+        """Clear staged model inputs after a completion call."""
+        self.inputs.clear()

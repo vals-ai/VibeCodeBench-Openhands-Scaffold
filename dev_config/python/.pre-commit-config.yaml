@@ -34,23 +34,3 @@ repos:
         entry: ruff format --config dev_config/python/ruff.toml
         types_or: [python, pyi, jupyter]
         exclude: ^(third_party/|enterprise/|openhands-cli/)
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          [
-            types-requests,
-            types-setuptools,
-            types-pyyaml,
-            types-toml,
-            types-docker,
-            types-Markdown,
-            pydantic,
-            lxml,
-          ]
-        # To see gaps add `--html-report mypy-report/`
-        entry: mypy --config-file dev_config/python/mypy.ini openhands/
-        always_run: true
-        pass_filenames: false

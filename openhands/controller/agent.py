@@ -3,6 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from model_library.base import ToolDefinition
+
+from openhands.llm.llm import LLM
 from openhands.llm.llm_registry import LLMRegistry
 
 if TYPE_CHECKING:
@@ -10,7 +13,6 @@ if TYPE_CHECKING:
     from openhands.events.action import Action
     from openhands.events.action.message import SystemMessageAction
     from openhands.utils.prompt import PromptManager
-from litellm import ChatCompletionToolParam
 
 from openhands.core.config import AgentConfig
 from openhands.core.exceptions import (
@@ -23,7 +25,7 @@ from openhands.runtime.plugins import PluginRequirement
 
 
 class Agent(ABC):
-    DEPRECATED = False
+    DEPRECATED: bool = False
     """
     This abstract base class is an general interface for an agent dedicated to
     executing a specific instruction and allowing human interaction with the
@@ -31,7 +33,7 @@ class Agent(ABC):
     It tracks the execution status and maintains a history of interactions.
     """
 
-    _registry: dict[str, type['Agent']] = {}
+    _registry: dict[str, type[Agent]] = {}
     sandbox_plugins: list[PluginRequirement] = []
 
     config_model: type[AgentConfig] = AgentConfig
@@ -42,13 +44,13 @@ class Agent(ABC):
         config: AgentConfig,
         llm_registry: LLMRegistry,
     ):
-        self.llm = llm_registry.get_llm_from_agent_config('agent', config)
-        self.llm_registry = llm_registry
-        self.config = config
-        self._complete = False
-        self._prompt_manager: 'PromptManager' | None = None
-        self.mcp_tools: dict[str, ChatCompletionToolParam] = {}
-        self.tools: list = []
+        self.llm: LLM = llm_registry.get_llm_from_agent_config('agent', config)
+        self.llm_registry: LLMRegistry = llm_registry
+        self.config: AgentConfig = config
+        self._complete: bool = False
+        self._prompt_manager: PromptManager | None = None
+        self.mcp_tools: dict[str, ToolDefinition] = {}
+        self.tools: list[ToolDefinition] = []
 
     @property
     def prompt_manager(self) -> 'PromptManager':
@@ -64,8 +66,6 @@ class Agent(ABC):
             SystemMessageAction: The system message action with content and tools
             None: If there was an error generating the system message
         """
-        # Import here to avoid circular imports
-        from openhands.events.action.message import SystemMessageAction
 
         try:
             if not self.prompt_manager:
@@ -74,15 +74,12 @@ class Agent(ABC):
                 )
                 return None
 
-            system_message = self.prompt_manager.get_system_message(
+            system_message: str = self.prompt_manager.get_system_message(
                 cli_mode=self.config.cli_mode
             )
 
-            # Get tools if available
-            tools = getattr(self, 'tools', None)
-
             system_message_action = SystemMessageAction(
-                content=system_message, tools=tools, agent_class=self.name
+                content=system_message, tools=self.tools, agent_class=self.name
             )
             # Set the source attribute
             system_message_action._source = EventSource.AGENT  # type: ignore
@@ -160,24 +157,23 @@ class Agent(ABC):
             raise AgentNotRegisteredError()
         return list(cls._registry.keys())
 
-    def set_mcp_tools(self, mcp_tools: list[dict]) -> None:
+    def set_mcp_tools(self, mcp_tools: list[ToolDefinition]) -> None:
         """Sets the list of MCP tools for the agent.
 
         Args:
-        - mcp_tools (list[dict]): The list of MCP tools.
+        - mcp_tools (list[ToolDefinition]): The list of MCP tools.
         """
         logger.info(
-            f'Setting {len(mcp_tools)} MCP tools for agent {self.name}: {[tool["function"]["name"] for tool in mcp_tools]}'
+            f'Setting {len(mcp_tools)} MCP tools for agent {self.name}: {[tool.name for tool in mcp_tools]}'
         )
         for tool in mcp_tools:
-            _tool = ChatCompletionToolParam(**tool)
-            if _tool['function']['name'] in self.mcp_tools:
-                logger.warning(
-                    f'Tool {_tool["function"]["name"]} already exists, skipping'
-                )
+            if tool.name in self.mcp_tools:
+                logger.warning(f'Tool {tool.name} already exists, skipping')
                 continue
-            self.mcp_tools[_tool['function']['name']] = _tool
-            self.tools.append(_tool)
+
+            self.mcp_tools[tool.name] = tool
+            self.tools.append(tool)
+
         logger.info(
-            f'Tools updated for agent {self.name}, total {len(self.tools)}: {[tool["function"]["name"] for tool in self.tools]}'
+            f'Tools updated for agent {self.name}, total {len(self.tools)}: {[tool.name for tool in self.tools]}'
         )

@@ -26,10 +26,7 @@ build = "build_vscode.py" # Build VSCode extension during Poetry build
 
 [tool.poetry.dependencies]
 python = "^3.12,<3.14"
-litellm = ">=1.74.3, <1.78.0, !=1.64.4, !=1.67.*"  # avoid 1.64.4 (known bug) & 1.67.* (known bug #10272)
-openai = "1.99.9"                                  # Pin due to litellm incompatibility with >=1.100.0 (BerriAI/litellm#13711)
 aiohttp = ">=3.9.0,!=3.11.13"                      # Pin to avoid yanked version 3.11.13
-google-genai = "*"                                 # To use litellm with Gemini Pro API
 google-api-python-client = "^2.164.0"              # For Google Sheets API
 google-auth-httplib2 = "*"                         # For Google Sheets authentication
 google-auth-oauthlib = "*"                         # For Google Sheets OAuth
@@ -97,7 +94,6 @@ setuptools = ">=78.1.1"
 redis = ">=5.2,<7.0"
 
 google-cloud-aiplatform = "*"
-anthropic = { extras = [ "vertex" ], version = "*" }
 boto3 = "*"
 kubernetes = "^33.1.0"
 pyyaml = "^6.0.2"
@@ -209,13 +205,20 @@ ignore = [ "E501" ]
 # prevent black (if installed) from changing single quotes to double quotes
 skip-string-normalization = true
 
-[tool.ruff]
-lint.select = [ "D" ]
-# ignore warnings for missing docstrings
-lint.ignore = [ "D1" ]
-lint.pydocstyle.convention = "google"
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "Q", "B", "ASYNC", "UP006", "UP007", "UP008"]
+ignore = [ "D1", "E501" ]
+pydocstyle.convention = "google"
 
 [tool.coverage.run]
 concurrency = [ "gevent" ]
 relative_files = true
 omit = [ "enterprise/tests/*", "**/test_*" ]
+
+[tool.pyright]
+extraPaths = ["./model-proxy"]
+
+reportExplicitAny = false
+reportAny = false
+
+reportAttributeAccessIssue = "none"

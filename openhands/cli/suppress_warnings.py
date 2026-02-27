@@ -2,6 +2,8 @@
 
 import warnings
 
+from model_library.logging import set_logging as set_model_library_logging
+
 
 def suppress_cli_warnings():
     """Suppress common warnings that appear during CLI usage."""
@@ -53,6 +55,9 @@ def suppress_cli_warnings():
         message="coroutine 'close_litellm_async_clients' was never awaited",
         category=RuntimeWarning,
     )
+
+    # Disable model_library logging (model proxy)
+    set_model_library_logging(False)
 
 
 # Apply warning suppressions when module is imported

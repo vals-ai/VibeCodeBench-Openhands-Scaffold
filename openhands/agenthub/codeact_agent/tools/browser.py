@@ -1,5 +1,5 @@
 from browsergym.core.action.highlevel import HighLevelActionSet
-from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
+from model_library.base import ToolBody, ToolDefinition
 
 from openhands.agenthub.codeact_agent.tools.security_utils import (
     RISK_LEVELS,
@@ -144,28 +144,25 @@ for _, action in _browser_action_space.action_set.items():
         f'Browser description mismatch. Please double check if the BrowserGym updated their action space.\n\nAction: {action.description}'
     )
 
-BrowserTool = ChatCompletionToolParam(
-    type='function',
-    function=ChatCompletionToolParamFunctionChunk(
+BrowserTool = ToolDefinition(
+    name=BROWSER_TOOL_NAME,
+    body=ToolBody(
         name=BROWSER_TOOL_NAME,
         description=_BROWSER_DESCRIPTION,
-        parameters={
-            'type': 'object',
-            'properties': {
-                'code': {
-                    'type': 'string',
-                    'description': (
-                        'The Python code that interacts with the browser.\n'
-                        + _BROWSER_TOOL_DESCRIPTION
-                    ),
-                },
-                'security_risk': {
-                    'type': 'string',
-                    'description': SECURITY_RISK_DESC,
-                    'enum': RISK_LEVELS,
-                },
+        properties={
+            'code': {
+                'type': 'string',
+                'description': (
+                    'The Python code that interacts with the browser.\n'
+                    + _BROWSER_TOOL_DESCRIPTION
+                ),
             },
-            'required': ['code', 'security_risk'],
+            'security_risk': {
+                'type': 'string',
+                'description': SECURITY_RISK_DESC,
+                'enum': RISK_LEVELS,
+            },
         },
+        required=['code', 'security_risk'],
     ),
 )

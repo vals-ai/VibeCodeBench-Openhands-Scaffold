@@ -68,7 +68,7 @@ class LLMConfig(BaseModel):
         default=30_000
     )  # maximum number of characters in an observation's content when sent to the llm
     temperature: float = Field(default=0.0)
-    top_p: float = Field(default=1.0)
+    top_p: float | None = Field(default=None)
     top_k: float | None = Field(default=None)
     custom_llm_provider: str | None = Field(default=None)
     max_input_tokens: int | None = Field(default=None)
@@ -171,11 +171,6 @@ class LLMConfig(BaseModel):
             os.environ['OR_SITE_URL'] = self.openrouter_site_url
         if self.openrouter_app_name:
             os.environ['OR_APP_NAME'] = self.openrouter_app_name
-
-        # Set reasoning_effort to 'high' by default for non-Gemini models
-        # Gemini models use optimized thinking budget when reasoning_effort is None
-        if self.reasoning_effort is None and 'gemini-2.5-pro' not in self.model:
-            self.reasoning_effort = 'high'
 
         # Set an API version by default for Azure models
         # Required for newer models.

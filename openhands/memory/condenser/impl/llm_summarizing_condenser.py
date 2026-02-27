@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from openhands.core.config.condenser_config import LLMSummarizingCondenserConfig
-from openhands.core.message import Message, TextContent
+from typing import override
+
+from model_library.base import TextInput
+
+from openhands.core.config.condenser_config import (
+    CondenserConfig,
+    LLMSummarizingCondenserConfig,
+)
 from openhands.events.action.agent import CondensationAction
 from openhands.events.observation.agent import AgentCondensationObservation
 from openhands.events.serialization.event import truncate_content
@@ -137,13 +143,14 @@ CURRENT_STATE: Last flip: Heads, Haiku count: 15/20"""
 
         prompt += 'Now summarize the events using the rules above.'
 
-        messages = [Message(role='user', content=[TextContent(text=prompt)])]
+        input_items = [TextInput(text=prompt)]
 
         response = self.llm.completion(
-            messages=self.llm.format_messages_for_llm(messages),
+            input=input_items,
+            history=[],
             extra_body={'metadata': self.llm_metadata},
         )
-        summary = response.choices[0].message.content
+        summary = response.output_text
 
         self.add_metadata('response', response.model_dump())
         self.add_metadata('metrics', self.llm.metrics.get())
@@ -157,12 +164,14 @@ CURRENT_STATE: Last flip: Heads, Haiku count: 15/20"""
             )
         )
 
+    @override
     def should_condense(self, view: View) -> bool:
         return len(view) > self.max_size
 
     @classmethod
+    @override
     def from_config(
-        cls, config: LLMSummarizingCondenserConfig, llm_registry: LLMRegistry
+        cls, config: CondenserConfig, llm_registry: LLMRegistry
     ) -> LLMSummarizingCondenser:
         # This condenser cannot take advantage of prompt caching. If it happens
         # to be set, we'll pay for the cache writes but never get a chance to

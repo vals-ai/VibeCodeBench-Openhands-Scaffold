@@ -1,4 +1,7 @@
+from typing import ClassVar
+
 from mcp.types import Tool
+from model_library.base import ToolBody, ToolDefinition
 from pydantic import ConfigDict
 
 
@@ -9,15 +12,21 @@ class MCPClientTool(Tool):
     by the MCPClient for each operation.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
 
-    def to_param(self) -> dict:
-        """Convert tool to function call format."""
-        return {
-            'type': 'function',
-            'function': {
-                'name': self.name,
-                'description': self.description,
-                'parameters': self.inputSchema,
-            },
-        }
+    def to_tool_definition(self) -> ToolDefinition:
+        """Convert tool to ToolDefinition format."""
+        # Extract properties and required fields from inputSchema
+        properties = self.inputSchema.get('properties', {})
+        required = self.inputSchema.get('required', [])
+
+        return ToolDefinition(
+            name=self.name,
+            body=ToolBody(
+                name=self.name,
+                description=self.description or '',
+                properties=properties,
+                required=required,
+                kwargs={},
+            ),
+        )

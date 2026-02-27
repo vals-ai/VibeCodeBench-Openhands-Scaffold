@@ -581,6 +581,7 @@ class StandaloneConversationManager(ConversationManager):
         if (
             event.observation == ObservationType.RUN
             and event.metadata.exit_code == 0  # Only consider successful commands
+            and type(event.command) == str
         ):
             command = event.command.lower()
 

@@ -1,4 +1,4 @@
-from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
+from model_library.base import ToolBody, ToolDefinition
 
 from openhands.agenthub.codeact_agent.tools.security_utils import (
     RISK_LEVELS,
@@ -119,37 +119,34 @@ print(MyClass().y)
 ```
 """
 
-LLMBasedFileEditTool = ChatCompletionToolParam(
-    type='function',
-    function=ChatCompletionToolParamFunctionChunk(
+LLMBasedFileEditTool = ToolDefinition(
+    name='edit_file',
+    body=ToolBody(
         name='edit_file',
         description=_FILE_EDIT_DESCRIPTION,
-        parameters={
-            'type': 'object',
-            'properties': {
-                'path': {
-                    'type': 'string',
-                    'description': 'The absolute path to the file to be edited.',
-                },
-                'content': {
-                    'type': 'string',
-                    'description': 'A draft of the new content for the file being edited. Note that the assistant may skip unchanged lines.',
-                },
-                'start': {
-                    'type': 'integer',
-                    'description': 'The starting line number for the edit (1-indexed, inclusive). Default is 1.',
-                },
-                'end': {
-                    'type': 'integer',
-                    'description': 'The ending line number for the edit (1-indexed, inclusive). Default is -1 (end of file).',
-                },
-                'security_risk': {
-                    'type': 'string',
-                    'description': SECURITY_RISK_DESC,
-                    'enum': RISK_LEVELS,
-                },
+        properties={
+            'path': {
+                'type': 'string',
+                'description': 'The absolute path to the file to be edited.',
             },
-            'required': ['path', 'content', 'security_risk'],
+            'content': {
+                'type': 'string',
+                'description': 'A draft of the new content for the file being edited. Note that the assistant may skip unchanged lines.',
+            },
+            'start': {
+                'type': 'integer',
+                'description': 'The starting line number for the edit (1-indexed, inclusive). Default is 1.',
+            },
+            'end': {
+                'type': 'integer',
+                'description': 'The ending line number for the edit (1-indexed, inclusive). Default is -1 (end of file).',
+            },
+            'security_risk': {
+                'type': 'string',
+                'description': SECURITY_RISK_DESC,
+                'enum': RISK_LEVELS,
+            },
         },
+        required=['path', 'content', 'security_risk'],
     ),
 )

@@ -1,8 +1,10 @@
 import json
 from datetime import datetime
+from typing import Any
 
 from json_repair import repair_json
-from litellm.types.utils import ModelResponse
+from model_library.base import QueryResult
+from pydantic import BaseModel
 
 from openhands.core.exceptions import LLMResponseError
 from openhands.events.event import Event
@@ -14,18 +16,20 @@ from openhands.llm.metrics import Metrics
 class OpenHandsJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles datetime and event objects"""
 
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        if isinstance(obj, Event):
-            return event_to_dict(obj)
-        if isinstance(obj, Metrics):
-            return obj.get()
-        if isinstance(obj, ModelResponse):
-            return obj.model_dump()
-        if isinstance(obj, CmdOutputMetadata):
-            return obj.model_dump()
-        return super().default(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, BaseModel):
+            return o.model_dump()
+        if isinstance(o, datetime):
+            return o.isoformat()
+        if isinstance(o, Event):
+            return event_to_dict(o)
+        if isinstance(o, Metrics):
+            return o.get()
+        if isinstance(o, QueryResult):
+            return o.model_dump()
+        if isinstance(o, CmdOutputMetadata):
+            return o.model_dump()
+        return super().default(o)
 
 
 # Create a single reusable encoder instance

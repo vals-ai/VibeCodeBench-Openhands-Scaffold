@@ -1,3 +1,6 @@
+model-proxy/
+tests/model_library_integration
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -259,3 +262,4 @@ containers/runtime/code
 test-results
 .sessions
 .eval_sessions
+config.toml

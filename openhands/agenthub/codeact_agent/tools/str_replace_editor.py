@@ -1,6 +1,6 @@
 import os
 
-from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
+from model_library.base import ToolBody, ToolDefinition
 
 from openhands.agenthub.codeact_agent.tools.security_utils import (
     RISK_LEVELS,
@@ -93,7 +93,7 @@ def create_str_replace_editor_tool(
     use_short_description: bool = False,
     workspace_mount_path_in_sandbox: str | None = None,
     runtime_type: str | None = None,
-) -> ChatCompletionToolParam:
+) -> ToolDefinition:
     # If no workspace path is provided, try to get it from environment
     if workspace_mount_path_in_sandbox is None:
         workspace_mount_path_in_sandbox = _get_workspace_mount_path_from_env(
@@ -105,57 +105,54 @@ def create_str_replace_editor_tool(
         if use_short_description
         else _DETAILED_STR_REPLACE_EDITOR_DESCRIPTION
     )
-    return ChatCompletionToolParam(
-        type='function',
-        function=ChatCompletionToolParamFunctionChunk(
+    return ToolDefinition(
+        name=STR_REPLACE_EDITOR_TOOL_NAME,
+        body=ToolBody(
             name=STR_REPLACE_EDITOR_TOOL_NAME,
             description=description,
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'command': {
-                        'description': 'The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`, `undo_edit`.',
-                        'enum': [
-                            'view',
-                            'create',
-                            'str_replace',
-                            'insert',
-                            'undo_edit',
-                        ],
-                        'type': 'string',
-                    },
-                    'path': {
-                        'description': f'Absolute path to file or directory, e.g. `{workspace_mount_path_in_sandbox}/file.py` or `{workspace_mount_path_in_sandbox}`.',
-                        'type': 'string',
-                    },
-                    'file_text': {
-                        'description': 'Required parameter of `create` command, with the content of the file to be created.',
-                        'type': 'string',
-                    },
-                    'old_str': {
-                        'description': 'Required parameter of `str_replace` command containing the string in `path` to replace.',
-                        'type': 'string',
-                    },
-                    'new_str': {
-                        'description': 'Optional parameter of `str_replace` command containing the new string (if not given, no string will be added). Required parameter of `insert` command containing the string to insert.',
-                        'type': 'string',
-                    },
-                    'insert_line': {
-                        'description': 'Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`.',
-                        'type': 'integer',
-                    },
-                    'view_range': {
-                        'description': 'Optional parameter of `view` command when `path` points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.',
-                        'items': {'type': 'integer'},
-                        'type': 'array',
-                    },
-                    'security_risk': {
-                        'type': 'string',
-                        'description': SECURITY_RISK_DESC,
-                        'enum': RISK_LEVELS,
-                    },
+            properties={
+                'command': {
+                    'description': 'The commands to run. Allowed options are: `view`, `create`, `str_replace`, `insert`, `undo_edit`.',
+                    'enum': [
+                        'view',
+                        'create',
+                        'str_replace',
+                        'insert',
+                        'undo_edit',
+                    ],
+                    'type': 'string',
                 },
-                'required': ['command', 'path', 'security_risk'],
+                'path': {
+                    'description': f'Absolute path to file or directory, e.g. `{workspace_mount_path_in_sandbox}/file.py` or `{workspace_mount_path_in_sandbox}`.',
+                    'type': 'string',
+                },
+                'file_text': {
+                    'description': 'Required parameter of `create` command, with the content of the file to be created.',
+                    'type': 'string',
+                },
+                'old_str': {
+                    'description': 'Required parameter of `str_replace` command containing the string in `path` to replace.',
+                    'type': 'string',
+                },
+                'new_str': {
+                    'description': 'Optional parameter of `str_replace` command containing the new string (if not given, no string will be added). Required parameter of `insert` command containing the string to insert.',
+                    'type': 'string',
+                },
+                'insert_line': {
+                    'description': 'Required parameter of `insert` command. The `new_str` will be inserted AFTER the line `insert_line` of `path`.',
+                    'type': 'integer',
+                },
+                'view_range': {
+                    'description': 'Optional parameter of `view` command when `path` points to a file. If none is given, the full file is shown. If provided, the file will be shown in the indicated line number range, e.g. [11, 12] will show lines 11 and 12. Indexing at 1 to start. Setting `[start_line, -1]` shows all lines from `start_line` to the end of the file.',
+                    'items': {'type': 'integer'},
+                    'type': 'array',
+                },
+                'security_risk': {
+                    'type': 'string',
+                    'description': SECURITY_RISK_DESC,
+                    'enum': RISK_LEVELS,
+                },
             },
+            required=['command', 'path', 'security_risk'],
         ),
     )

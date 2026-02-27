@@ -3,6 +3,7 @@ import json
 import os
 import signal
 import sys
+import threading
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -213,7 +214,32 @@ async def run_controller(
         # init with the provided actions
         event_stream.add_event(initial_user_action, EventSource.USER)
 
+    # Lock for thread-safe trajectory writing
+    trajectory_lock = threading.Lock()
+
+    def save_trajectory():
+        if config.save_trajectory_path is not None:
+            # if save_trajectory_path is a folder, use session id as file name
+            if os.path.isdir(config.save_trajectory_path):
+                file_path = os.path.join(config.save_trajectory_path, sid + '.json')
+            else:
+                file_path = config.save_trajectory_path
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # Use thread lock to prevent concurrent writes
+            with trajectory_lock:
+                # Get trajectory data
+                histories = controller.get_trajectory(
+                    config.save_screenshots_in_trajectory
+                )
+
+                with open(file_path, 'w') as f:
+                    json.dump(histories, f, indent=4)
+
     def on_event(event: Event) -> None:
+        if event.source == EventSource.AGENT:
+            # TODO: We may want to do this less frequently
+            save_trajectory()
         if isinstance(event, AgentStateChangedObservation):
             if event.agent_state == AgentState.AWAITING_USER_INPUT:
                 if exit_on_message:
@@ -297,17 +323,7 @@ async def run_controller(
 
     state = controller.get_state()
 
-    # save trajectories if applicable
-    if config.save_trajectory_path is not None:
-        # if save_trajectory_path is a folder, use session id as file name
-        if os.path.isdir(config.save_trajectory_path):
-            file_path = os.path.join(config.save_trajectory_path, sid + '.json')
-        else:
-            file_path = config.save_trajectory_path
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        histories = controller.get_trajectory(config.save_screenshots_in_trajectory)
-        with open(file_path, 'w') as f:
-            json.dump(histories, f, indent=4)
+    save_trajectory()
 
     return state
 

@@ -1,15 +1,15 @@
+from typing import Any
+
 from openhands.controller.state.control_flags import (
     BudgetControlFlag,
     IterationControlFlag,
 )
 from openhands.controller.state.state import State
 from openhands.core.logger import openhands_logger as logger
-from openhands.events.action.agent import AgentDelegateAction, ChangeAgentStateAction
+from openhands.events.action.agent import ChangeAgentStateAction
 from openhands.events.action.empty import NullAction
-from openhands.events.event import Event
 from openhands.events.event_filter import EventFilter
 from openhands.events.observation.agent import AgentStateChangedObservation
-from openhands.events.observation.delegate import AgentDelegateObservation
 from openhands.events.observation.empty import NullObservation
 from openhands.events.serialization.event import event_to_trajectory
 from openhands.events.stream import EventStream
@@ -73,7 +73,7 @@ class StateTracker:
             self.state = State(
                 session_id=id.removesuffix('-delegate'),
                 user_id=self.user_id,
-                inputs={},
+                inputs=[],
                 conversation_stats=conversation_stats,
                 iteration_flag=IterationControlFlag(
                     limit_increase_amount=max_iterations,
@@ -96,111 +96,21 @@ class StateTracker:
             )
         else:
             self.state = state
-            if self.state.start_id <= -1:
-                self.state.start_id = 0
 
-            state.conversation_stats = conversation_stats
+        if self.state.start_id <= -1:
+            self.state.start_id = 0
 
-    def _init_history(self, event_stream: EventStream) -> None:
-        """Initializes the agent's history from the event stream.
-
-        The history is a list of events that:
-        - Excludes events of types listed in self.filter_out
-        - Excludes events with hidden=True attribute
-        - For delegate events (between AgentDelegateAction and AgentDelegateObservation):
-            - Excludes all events between the action and observation
-            - Includes the delegate action and observation themselves
-        """
-        # define range of events to fetch
-        # delegates start with a start_id and initially won't find any events
-        # otherwise we're restoring a previous session
-        start_id = self.state.start_id if self.state.start_id >= 0 else 0
-        end_id = (
-            self.state.end_id
-            if self.state.end_id >= 0
-            else event_stream.get_latest_event_id()
-        )
-
-        # sanity check
-        if start_id > end_id + 1:
-            logger.warning(
-                f'start_id {start_id} is greater than end_id + 1 ({end_id + 1}). History will be empty.',
-            )
-            self.state.history = []
-            return
-
-        events: list[Event] = []
-
-        # Get rest of history
-        events_to_add = list(
-            event_stream.search_events(
-                start_id=start_id,
-                end_id=end_id,
-                reverse=False,
-                filter=self.agent_history_filter,
-            )
-        )
-        events.extend(events_to_add)
-
-        # Find all delegate action/observation pairs
-        delegate_ranges: list[tuple[int, int]] = []
-        delegate_action_ids: list[int] = []  # stack of unmatched delegate action IDs
-
-        for event in events:
-            if isinstance(event, AgentDelegateAction):
-                delegate_action_ids.append(event.id)
-                # Note: we can get agent=event.agent and task=event.inputs.get('task','')
-                # if we need to track these in the future
-
-            elif isinstance(event, AgentDelegateObservation):
-                # Match with most recent unmatched delegate action
-                if not delegate_action_ids:
-                    logger.warning(
-                        f'Found AgentDelegateObservation without matching action at id={event.id}',
-                    )
-                    continue
-
-                action_id = delegate_action_ids.pop()
-                delegate_ranges.append((action_id, event.id))
-
-        # Filter out events between delegate action/observation pairs
-        if delegate_ranges:
-            filtered_events: list[Event] = []
-            current_idx = 0
-
-            for start_id, end_id in sorted(delegate_ranges):
-                # Add events before delegate range
-                filtered_events.extend(
-                    event for event in events[current_idx:] if event.id < start_id
-                )
-
-                # Add delegate action and observation
-                filtered_events.extend(
-                    event for event in events if event.id in (start_id, end_id)
-                )
-
-                # Update index to after delegate range
-                current_idx = next(
-                    (i for i, e in enumerate(events) if e.id > end_id), len(events)
-                )
-
-            # Add any remaining events after last delegate range
-            filtered_events.extend(events[current_idx:])
-
-            self.state.history = filtered_events
-        else:
-            self.state.history = events
-
-        # make sure history is in sync
-        self.state.start_id = start_id
+        self.state.conversation_stats = conversation_stats
 
     def close(self, event_stream: EventStream):
-        # we made history, now is the time to rewrite it!
-        # the final state.history will be used by external scripts like evals, tests, etc.
-        # history will need to be complete WITH delegates events
-        # like the regular agent history, it does not include:
-        # - 'hidden' events, events with hidden=True
-        # - backend events (the default 'filtered out' types, types in self.filter_out)
+        # Update end_id for persistence
+        if self.state.end_id < 0:
+            self.state.end_id = event_stream.get_latest_event_id()
+
+    def get_trajectory(
+        self, event_stream: EventStream, include_screenshots: bool = False
+    ) -> list[dict[str, Any]]:
+        """Get trajectory from event_stream."""
         start_id = self.state.start_id if self.state.start_id >= 0 else 0
         end_id = (
             self.state.end_id
@@ -208,7 +118,7 @@ class StateTracker:
             else event_stream.get_latest_event_id()
         )
 
-        self.state.history = list(
+        events = list(
             event_stream.search_events(
                 start_id=start_id,
                 end_id=end_id,
@@ -217,16 +127,7 @@ class StateTracker:
             )
         )
 
-    def add_history(self, event: Event):
-        # if the event is not filtered out, add it to the history
-        if self.agent_history_filter.include(event):
-            self.state.history.append(event)
-
-    def get_trajectory(self, include_screenshots: bool = False) -> list[dict]:
-        return [
-            event_to_trajectory(event, include_screenshots)
-            for event in self.state.history
-        ]
+        return [event_to_trajectory(event, include_screenshots) for event in events]
 
     def maybe_increase_control_flags_limits(self, headless_mode: bool):
         # Iteration and budget extensions are independent of each other

@@ -1,4 +1,4 @@
-from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
+from model_library.base import ToolBody, ToolDefinition
 
 _THINK_DESCRIPTION = """Use the tool to think about something. It will not obtain new information or make any changes to the repository, but just log the thought. Use it when complex reasoning or brainstorming is needed.
 
@@ -11,17 +11,17 @@ Common use cases:
 
 The tool simply logs your thought process for better transparency and does not execute any code or make changes."""
 
-ThinkTool = ChatCompletionToolParam(
-    type='function',
-    function=ChatCompletionToolParamFunctionChunk(
+ThinkTool = ToolDefinition(
+    name='think',
+    body=ToolBody(
         name='think',
         description=_THINK_DESCRIPTION,
-        parameters={
-            'type': 'object',
-            'properties': {
-                'thought': {'type': 'string', 'description': 'The thought to log.'},
+        properties={
+            'thought': {
+                'type': 'string',
+                'description': 'The thought to log.',
             },
-            'required': ['thought'],
         },
+        required=['thought'],
     ),
 )

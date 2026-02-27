@@ -134,7 +134,7 @@ class ActionExecutionClient(Runtime):
         response = self._send_action_server_request(
             'GET',
             request_url,
-            timeout=5,
+            timeout=10,
         )
         self.log('debug', f'Response status code: {response.status_code}')
         self.log('debug', f'Response text: {response.text}')

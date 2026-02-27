@@ -39,10 +39,8 @@ class View(BaseModel):
         if isinstance(key, slice):
             start, stop, step = key.indices(len(self))
             return [self[i] for i in range(start, stop, step)]
-        elif isinstance(key, int):
-            return self.events[key]
         else:
-            raise ValueError(f'Invalid key type: {type(key)}')
+            return self.events[key]
 
     @staticmethod
     def from_events(events: list[Event]) -> View:

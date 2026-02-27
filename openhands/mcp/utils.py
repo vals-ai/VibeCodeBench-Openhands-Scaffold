@@ -3,6 +3,8 @@ import json
 import shutil
 from typing import TYPE_CHECKING
 
+from model_library.base import ToolDefinition
+
 if TYPE_CHECKING:
     from openhands.controller.agent import Agent
     from openhands.memory.memory import Memory
@@ -26,28 +28,30 @@ from openhands.runtime.base import Runtime
 from openhands.runtime.impl.cli.cli_runtime import CLIRuntime
 
 
-def convert_mcp_clients_to_tools(mcp_clients: list[MCPClient] | None) -> list[dict]:
-    """Converts a list of MCPClient instances to ChatCompletionToolParam format
+def convert_mcp_clients_to_tools(
+    mcp_clients: list[MCPClient] | None,
+) -> list[ToolDefinition]:
+    """Converts a list of MCPClient instances to ToolBody format
     that can be used by CodeActAgent.
 
     Args:
         mcp_clients: List of MCPClient instances or None
 
     Returns:
-        List of dicts of tools ready to be used by CodeActAgent
+        List of ToolBody objects ready to be used by CodeActAgent
     """
     if mcp_clients is None:
         logger.warning('mcp_clients is None, returning empty list')
         return []
 
-    all_mcp_tools = []
+    all_mcp_tools: list[ToolDefinition] = []
     try:
         for client in mcp_clients:
-            # Each MCPClient has an mcp_clients property that is a ToolCollection
-            # The ToolCollection has a to_params method that converts tools to ChatCompletionToolParam format
+            # Each MCPClient has a tools property that contains MCPClientTool instances
+            # Convert each tool to ToolBody format
             for tool in client.tools:
-                mcp_tools = tool.to_param()
-                all_mcp_tools.append(mcp_tools)
+                tool_body = tool.to_tool_definition()
+                all_mcp_tools.append(tool_body)
     except Exception as e:
         error_msg = f'Error in convert_mcp_clients_to_tools: {e}'
         logger.error(error_msg)
@@ -88,7 +92,7 @@ async def create_mcp_clients(
     if not servers:
         return []
 
-    mcp_clients = []
+    mcp_clients: list[MCPClient] = []
 
     for server in servers:
         if isinstance(server, MCPStdioServerConfig):
@@ -96,7 +100,7 @@ async def create_mcp_clients(
             if not shutil.which(server.command):
                 logger.error(
                     f'Skipping MCP stdio server "{server.name}": command "{server.command}" not found. '
-                    f'Please install {server.command} or remove this server from your configuration.'
+                    + f'Please install {server.command} or remove this server from your configuration.'
                 )
                 continue
 
@@ -112,7 +116,7 @@ async def create_mcp_clients(
                 )
                 logger.debug(
                     f'Successfully connected to MCP stdio server {server_name} - '
-                    f'provides {len(tool_names)} tools: {tool_names}'
+                    + f'provides {len(tool_names)} tools: {tool_names}'
                 )
 
                 mcp_clients.append(client)
@@ -141,7 +145,7 @@ async def create_mcp_clients(
             tool_names = [tool.name for tool in client.tools]
             logger.debug(
                 f'Successfully connected to MCP STTP server {server.url} - '
-                f'provides {len(tool_names)} tools: {tool_names}'
+                + f'provides {len(tool_names)} tools: {tool_names}'
             )
 
             # Only add the client to the list after a successful connection
@@ -156,7 +160,7 @@ async def create_mcp_clients(
 
 async def fetch_mcp_tools_from_config(
     mcp_config: MCPConfig, conversation_id: str | None = None, use_stdio: bool = False
-) -> list[dict]:
+) -> list[ToolDefinition]:
     """Retrieves the list of MCP tools from the MCP clients.
 
     Args:
@@ -174,8 +178,8 @@ async def fetch_mcp_tools_from_config(
         logger.info('MCP functionality is disabled on Windows, skipping tool fetching')
         return []
 
-    mcp_clients = []
-    mcp_tools = []
+    mcp_clients: list[MCPClient] = []
+    mcp_tools: list[ToolDefinition] = []
     try:
         logger.debug(f'Creating MCP clients with config: {mcp_config}')
 
@@ -330,7 +334,7 @@ async def add_mcp_tools_to_agent(
         updated_mcp_config, use_stdio=isinstance(runtime, CLIRuntime)
     )
 
-    tool_names = [tool['function']['name'] for tool in mcp_tools]
+    tool_names = [tool.name for tool in mcp_tools]
     logger.info(f'Loaded {len(mcp_tools)} MCP tools: {tool_names}')
 
     # Set the MCP tools on the agent

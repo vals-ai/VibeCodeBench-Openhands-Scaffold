@@ -4,7 +4,7 @@ import asyncio
 import copy
 import os
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from openhands.security.analyzer import SecurityAnalyzer
@@ -16,13 +16,21 @@ from litellm.exceptions import (  # noqa
     BadRequestError,
     ContentPolicyViolationError,
     ContextWindowExceededError,
+    RateLimitError,
     InternalServerError,
     NotFoundError,
     OpenAIError,
-    RateLimitError,
     ServiceUnavailableError,
     Timeout,
 )
+from model_library.base import (
+    FileWithBase64,
+    FileWithUrl,
+    InputItem,
+    TextInput,
+    ToolResult,
+)
+from model_library.exceptions import MaxContextWindowExceededError
 
 from openhands.controller.agent import Agent
 from openhands.controller.replay import ReplayManager
@@ -31,12 +39,9 @@ from openhands.controller.state.state_tracker import StateTracker
 from openhands.controller.stuck import StuckDetector
 from openhands.core.config import AgentConfig, LLMConfig
 from openhands.core.exceptions import (
-    AgentStuckInLoopError,
     FunctionCallNotExistsError,
     FunctionCallValidationError,
-    LLMContextWindowExceedError,
     LLMMalformedActionError,
-    LLMNoActionError,
     LLMResponseError,
 )
 from openhands.core.logger import LOG_ALL_EVENTS
@@ -75,9 +80,12 @@ from openhands.events.observation import (
     AgentDelegateObservation,
     AgentStateChangedObservation,
     ErrorObservation,
+    IPythonRunCellObservation,
     NullObservation,
     Observation,
 )
+from openhands.events.observation.commands import CmdOutputObservation
+from openhands.events.observation.browse import BrowserOutputObservation
 from openhands.events.serialization.event import truncate_content
 from openhands.llm.metrics import Metrics
 from openhands.runtime.runtime_status import RuntimeStatus
@@ -127,7 +135,7 @@ class AgentController:
         initial_state: State | None = None,
         is_delegate: bool = False,
         headless_mode: bool = True,
-        status_callback: Callable | None = None,
+        status_callback: Callable[[str, RuntimeStatus, str], None] | None = None,
         replay_events: list[Event] | None = None,
         security_analyzer: 'SecurityAnalyzer | None' = None,
     ):
@@ -288,7 +296,7 @@ class AgentController:
         self,
         level: str,
         message: str,
-        extra: dict | None = None,
+        extra: dict[str, Any] | None = None,
         exc_info: bool = False,
     ) -> None:
         """Logs a message to the agent controller's logger.
@@ -387,7 +395,7 @@ class AgentController:
                 or isinstance(e, AuthenticationError)
                 or isinstance(e, RateLimitError)
                 or isinstance(e, ContentPolicyViolationError)
-                or isinstance(e, LLMContextWindowExceedError)
+                or isinstance(e, MaxContextWindowExceededError)
             ):
                 reported = e
             else:
@@ -476,8 +484,6 @@ class AgentController:
         if hasattr(event, 'hidden') and event.hidden:
             return
 
-        self.state_tracker.add_history(event)
-
         if isinstance(event, Action):
             await self._handle_action(event)
         elif isinstance(event, Observation):
@@ -541,6 +547,9 @@ class AgentController:
             log_level, str(observation_to_print), extra={'msg_type': 'OBSERVATION'}
         )
 
+        input_items = self.observation_to_input_items(observation)
+        self.state.inputs.extend(input_items)
+
         # this happens for runnable actions and microagent actions
         if self._pending_action and self._pending_action.id == observation.cause:
             if self.state.agent_state == AgentState.AWAITING_USER_CONFIRMATION:
@@ -570,6 +579,9 @@ class AgentController:
                 str(action),
                 extra={'msg_type': 'ACTION', 'event_source': EventSource.USER},
             )
+
+            input_items = self.message_to_input_items(action)
+            self.state.inputs.extend(input_items)
 
             # if this is the first user message for this agent, matters for the microagent info type
             first_user_message = self._first_user_message()
@@ -603,7 +615,8 @@ class AgentController:
         if self._pending_action and hasattr(self._pending_action, 'tool_call_metadata'):
             # find out if there already is an observation with the same tool call metadata
             found_observation = False
-            for event in self.state.history:
+
+            for event in self.state.get_history_from_stream(self.event_stream):
                 if (
                     isinstance(event, Observation)
                     and event.tool_call_metadata
@@ -854,11 +867,11 @@ class AgentController:
 
         # Synchronize spend across all llm services with the budget flag
         self.state_tracker.sync_budget_flag_with_metrics()
-        if self._is_stuck():
-            await self._react_to_exception(
-                AgentStuckInLoopError('Agent got stuck in a loop')
-            )
-            return
+        # if self._is_stuck():
+        #     await self._react_to_exception(
+        #         AgentStuckInLoopError('Agent got stuck in a loop')
+        #     )
+        #     return
 
         try:
             self.state_tracker.run_control_flags()
@@ -876,53 +889,34 @@ class AgentController:
         else:
             try:
                 action = self.agent.step(self.state)
-                if action is None:
-                    raise LLMNoActionError('No action was returned')
+
                 action._source = EventSource.AGENT  # type: ignore [attr-defined]
             except (
                 LLMMalformedActionError,
-                LLMNoActionError,
                 LLMResponseError,
                 FunctionCallValidationError,
                 FunctionCallNotExistsError,
+                RateLimitError,
             ) as e:
+                tool_call = getattr(e, 'tool_call', None)
+                error_observation = ErrorObservation(
+                    content=str(e),
+                    tool_call=tool_call,
+                )
+
                 self.event_stream.add_event(
-                    ErrorObservation(
-                        content=str(e),
-                    ),
+                    error_observation,
                     EventSource.AGENT,
                 )
                 return
-            except (ContextWindowExceededError, BadRequestError, OpenAIError) as e:
-                # FIXME: this is a hack until a litellm fix is confirmed
-                # Check if this is a nested context window error
-                # We have to rely on string-matching because LiteLLM doesn't consistently
-                # wrap the failure in a ContextWindowExceededError
-                error_str = str(e).lower()
-                if (
-                    'contextwindowexceedederror' in error_str
-                    or 'prompt is too long' in error_str
-                    or 'input length and `max_tokens` exceed context limit' in error_str
-                    or 'please reduce the length of' in error_str
-                    or 'the request exceeds the available context size' in error_str
-                    or 'context length exceeded' in error_str
-                    # For OpenRouter context window errors
-                    or (
-                        'sambanovaexception' in error_str
-                        and 'maximum context length' in error_str
+            except MaxContextWindowExceededError as e:
+                if self.agent.config.enable_history_truncation:
+                    self.event_stream.add_event(
+                        CondensationRequestAction(), EventSource.AGENT
                     )
-                    # For SambaNova context window errors - only match when both patterns are present
-                    or isinstance(e, ContextWindowExceededError)
-                ):
-                    if self.agent.config.enable_history_truncation:
-                        self.event_stream.add_event(
-                            CondensationRequestAction(), EventSource.AGENT
-                        )
-                        return
-                    else:
-                        raise LLMContextWindowExceedError()
+                    return
                 else:
-                    raise e
+                    raise e from e
 
         if action.runnable:
             if self.state.confirmation_mode and (
@@ -1062,15 +1056,141 @@ class AgentController:
             max_budget_per_task,
             confirmation_mode,
         )
-        # Always load from the event stream to avoid losing history
-        self.state_tracker._init_history(
-            self.event_stream,
-        )
 
-    def get_trajectory(self, include_screenshots: bool = False) -> list[dict]:
+    def get_trajectory(self, include_screenshots: bool = False) -> list[dict[str, Any]]:
         # state history could be partially hidden/truncated before controller is closed
-        assert self._closed
-        return self.state_tracker.get_trajectory(include_screenshots)
+        # assert self._closed
+        return self.state_tracker.get_trajectory(self.event_stream, include_screenshots)
+
+    def _add_images_if_available(
+        self, observation: Observation, input_items: list[InputItem]
+    ) -> None:
+        if not self.agent.llm.vision_is_active():
+            return
+
+        if isinstance(observation, BrowserOutputObservation):
+            image_url = None
+            if observation.set_of_marks and len(observation.set_of_marks) > 0:
+                image_url = observation.set_of_marks
+            elif observation.screenshot and len(observation.screenshot) > 0:
+                image_url = observation.screenshot
+
+            if image_url:
+                base64_data = self._extract_base64_from_data_url(image_url)
+                input_items.append(
+                    FileWithBase64(
+                        type='image',
+                        name='browser_screenshot.png',
+                        mime='png',
+                        base64=base64_data,
+                    )
+                )
+        elif isinstance(observation, IPythonRunCellObservation):
+            if observation.image_urls:
+                for idx, image_url in enumerate(observation.image_urls):
+                    base64_data = self._extract_base64_from_data_url(image_url)
+                    input_items.append(
+                        FileWithBase64(
+                            type='image',
+                            name=f'ipython_output_{idx}.png',
+                            mime='png',
+                            base64=base64_data,
+                        )
+                    )
+
+    def _extract_base64_from_data_url(self, data_url: str) -> str:
+        if data_url.startswith('data:'):
+            if ',' in data_url:
+                return data_url.split(',', 1)[1]
+        return data_url
+
+    def observation_to_input_items(self, observation: Observation) -> list[InputItem]:
+        """
+        Take an observation and convert it to a ToolResult object and append it to the state.inputs.
+
+        After we create the ToolResult object, we need to delete the tool call from the pending_tool_calls dictionary.
+        This is because the tool call is now processed and we don't need to keep it in the dictionary.
+        """
+        input_items: list[InputItem] = []
+
+        tool_call_id = None
+        if isinstance(observation, ErrorObservation) and observation.tool_call_id:
+            tool_call_id = observation.tool_call_id
+        elif observation.tool_call_metadata:
+            tool_call_id = observation.tool_call_metadata.tool_call_id
+
+        def _format_observation_content(obs: Observation) -> str:
+            if isinstance(obs, CmdOutputObservation):
+                formatted = obs.to_agent_observation()
+            elif isinstance(obs, IPythonRunCellObservation):
+                lines = obs.content.split('\n')
+                formatted = '\n'.join(
+                    '![image](data:image/png;base64, ...) already displayed to user'
+                    if '![image](data:image/png;base64,' in line
+                    else line
+                    for line in lines
+                )
+            elif isinstance(obs, BrowserOutputObservation):
+                # Avoid duplicating screenshots/marks in text; rely on attachments
+                formatted = obs.content or ''
+            else:
+                formatted = obs.content
+
+            max_chars = getattr(self.agent.llm.config, 'max_message_chars', None)
+            if max_chars and max_chars > 0:
+                formatted = truncate_content(formatted, max_chars)
+            return formatted
+
+        if tool_call_id in self.state.pending_tool_calls:
+            tool_call = self.state.pending_tool_calls[tool_call_id]
+            formatted_result = _format_observation_content(observation)
+
+            tool_result = ToolResult(
+                tool_call=tool_call,
+                result=formatted_result,
+            )
+
+            input_items.append(tool_result)
+
+            self._add_images_if_available(observation, input_items)
+
+            del self.state.pending_tool_calls[tool_call_id]
+        elif tool_call_id is not None:
+            self.log(
+                'warning',
+                f'Tool call {tool_call_id} not found in pending_tool_calls',
+                extra={'msg_type': 'TOOL_CALL_NOT_FOUND'},
+            )
+        else:
+            # No pending tool call: emitting a user-style message
+            formatted_result = _format_observation_content(observation)
+            if formatted_result.strip():
+                # Prefix to indicate this came from a user-initiated command/output
+                prefixed = (
+                    f'\nObserved result of command executed by user:\n{formatted_result}'
+                )
+                input_items.append(TextInput(text=prefixed))
+                # Attach images for non-tool-call observations if available
+                self._add_images_if_available(observation, input_items)
+
+        return input_items
+
+    def message_to_input_items(self, message: MessageAction) -> list[InputItem]:
+        """Convert message action to TextInput object and append to state.inputs."""
+        input_items: list[InputItem] = []
+
+        if message.image_urls:
+            for url in message.image_urls:
+                if self.agent.llm.vision_is_active():
+                    input_items.append(TextInput(text=f'Image {url}\n'))
+
+                input_items.append(
+                    FileWithUrl(type='image', name=url, mime='image/png', url=url)
+                )
+
+        input_items.append(TextInput(text=message.content))
+
+        return input_items
 
     def _is_stuck(self) -> bool:
         """Checks if the agent or its delegate is stuck in a loop.
@@ -1123,14 +1243,14 @@ class AgentController:
         self.log(
             'debug',
             f'Action metrics - accumulated_cost: {metrics.accumulated_cost}, max_budget: {metrics.max_budget_per_task}, '
-            f'latest tokens (prompt/completion/cache_read/cache_write): '
-            f'{latest_usage.prompt_tokens if latest_usage else 0}/'
-            f'{latest_usage.completion_tokens if latest_usage else 0}/'
-            f'{latest_usage.cache_read_tokens if latest_usage else 0}/'
-            f'{latest_usage.cache_write_tokens if latest_usage else 0}, '
-            f'accumulated tokens (prompt/completion): '
-            f'{accumulated_usage.prompt_tokens}/'
-            f'{accumulated_usage.completion_tokens}',
+            + 'latest tokens (prompt/completion/cache_read/cache_write): '
+            + f'{latest_usage.prompt_tokens if latest_usage else 0}/'
+            + f'{latest_usage.completion_tokens if latest_usage else 0}/'
+            + f'{latest_usage.cache_read_tokens if latest_usage else 0}/'
+            + f'{latest_usage.cache_write_tokens if latest_usage else 0}, '
+            + 'accumulated tokens (prompt/completion): '
+            + f'{accumulated_usage.prompt_tokens}/'
+            + f'{accumulated_usage.completion_tokens}',
             extra={'msg_type': 'METRICS'},
         )
 

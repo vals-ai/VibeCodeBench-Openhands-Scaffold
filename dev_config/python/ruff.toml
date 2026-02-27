@@ -9,6 +9,7 @@ select = [
     "I",
     "Q",
     "B",
+    "F401",
     "ASYNC",
     "UP006",  # Use `list` instead of `List` for annotations
     "UP007",  # Use `X | Y` instead of `Union[X, Y]`

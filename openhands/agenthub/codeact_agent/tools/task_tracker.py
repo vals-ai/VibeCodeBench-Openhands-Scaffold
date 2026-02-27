@@ -1,4 +1,4 @@
-from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
+from model_library.base import ToolBody, ToolDefinition
 
 from openhands.llm.tool_names import TASK_TRACKER_TOOL_NAME
 
@@ -148,56 +148,52 @@ tracking and systematic organization of complex coding activities.
 
 def create_task_tracker_tool(
     use_short_description: bool = False,
-) -> ChatCompletionToolParam:
+) -> ToolDefinition:
     description = (
         _SHORT_TASK_TRACKER_DESCRIPTION
         if use_short_description
         else _DETAILED_TASK_TRACKER_DESCRIPTION
     )
-    return ChatCompletionToolParam(
-        type='function',
-        function=ChatCompletionToolParamFunctionChunk(
+    return ToolDefinition(
+        name=TASK_TRACKER_TOOL_NAME,
+        body=ToolBody(
             name=TASK_TRACKER_TOOL_NAME,
             description=description,
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'command': {
-                        'type': 'string',
-                        'enum': ['view', 'plan'],
-                        'description': 'The command to execute. `view` shows the current task list. `plan` creates or updates the task list based on provided requirements and progress. Always `view` the current list before making changes.',
-                    },
-                    'task_list': {
-                        'type': 'array',
-                        'description': 'The full task list. Required parameter of `plan` command.',
-                        'items': {
-                            'type': 'object',
-                            'properties': {
-                                'id': {
-                                    'type': 'string',
-                                    'description': 'Unique task identifier',
-                                },
-                                'title': {
-                                    'type': 'string',
-                                    'description': 'Brief task description',
-                                },
-                                'status': {
-                                    'type': 'string',
-                                    'description': 'Current task status',
-                                    'enum': ['todo', 'in_progress', 'done'],
-                                },
-                                'notes': {
-                                    'type': 'string',
-                                    'description': 'Optional additional context or details',
-                                },
+            properties={
+                'command': {
+                    'type': 'string',
+                    'enum': ['view', 'plan'],
+                    'description': 'The command to execute. `view` shows the current task list. `plan` creates or updates the task list based on provided requirements and progress. Always `view` the current list before making changes.',
+                },
+                'task_list': {
+                    'type': 'array',
+                    'description': 'The full task list. Required parameter of `plan` command.',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {
+                                'type': 'string',
+                                'description': 'Unique task identifier',
                             },
-                            'required': ['title', 'status', 'id'],
-                            'additionalProperties': False,
+                            'title': {
+                                'type': 'string',
+                                'description': 'Brief task description',
+                            },
+                            'status': {
+                                'type': 'string',
+                                'description': 'Current task status',
+                                'enum': ['todo', 'in_progress', 'done'],
+                            },
+                            'notes': {
+                                'type': 'string',
+                                'description': 'Optional additional context or details',
+                            },
                         },
+                        'required': ['title', 'status', 'id'],
+                        'additionalProperties': False,
                     },
                 },
-                'required': ['command'],
-                'additionalProperties': False,
             },
+            required=['command'],
         ),
     )

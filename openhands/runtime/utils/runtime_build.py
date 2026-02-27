@@ -287,6 +287,11 @@ def prep_build_folder(
         Path(project_root, 'microagents'), Path(build_folder, 'code', 'microagents')
     )
 
+    # Copy the 'model-proxy' directory (Model Proxy)
+    model_proxy_path = Path(project_root, 'model-proxy')
+    if model_proxy_path.exists():
+        shutil.copytree(model_proxy_path, Path(build_folder, 'code', 'model-proxy'))
+
     # Copy pyproject.toml and poetry.lock files
     for file in ['pyproject.toml', 'poetry.lock']:
         src = Path(openhands_source_dir, file)

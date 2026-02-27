@@ -8,6 +8,7 @@ from uuid import UUID
 import docker
 import httpx
 import tenacity
+from docker.errors import APIError, NotFound
 from docker.models.containers import Container
 from docker.types import DriverConfig, Mount
 
@@ -171,7 +172,7 @@ class DockerRuntime(ActionExecutionClient):
         self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
         try:
             await call_sync_from_async(self._attach_to_container)
-        except docker.errors.NotFound as e:
+        except NotFound as e:
             if self.attach_to_existing:
                 self.log(
                     'warning',
@@ -251,7 +252,7 @@ class DockerRuntime(ActionExecutionClient):
     @lru_cache(maxsize=1)
     def _init_docker_client() -> docker.DockerClient:
         try:
-            return docker.from_env()
+            return docker.from_env(timeout=120)
         except Exception as ex:
             logger.error(
                 'Launch docker client failed. Please make sure you have installed docker and started docker desktop/daemon.',
@@ -540,11 +541,36 @@ class DockerRuntime(ActionExecutionClient):
             self.close()
             raise e
 
+    def _recreate_container_if_not_found(self, exc: NotFound, error_message: str | None = None) -> None:
+        if self.attach_to_existing:
+            if error_message:
+                raise AgentRuntimeNotFoundError(error_message) from exc
+            raise
+
+        self.log(
+            'warning',
+            f'Container {self.container_name} vanished unexpectedly. Recreating runtime container.',
+        )
+        self._release_port_locks()
+        self.maybe_build_runtime_container_image()
+        self.init_container()
+        if not self.container:
+            raise AgentRuntimeNotFoundError(
+                error_message or f'Container {self.container_name} could not be recreated.'
+            ) from exc
+
     def _attach_to_container(self) -> None:
-        self.container = self.docker_client.containers.get(self.container_name)
+        try:
+            self.container = self.docker_client.containers.get(self.container_name)
+        except NotFound as exc:
+            self._recreate_container_if_not_found(exc)
+
+        if not self.container:
+            raise AgentRuntimeNotFoundError(
+                f'Container {self.container_name} not found.'
+            )
         if self.container.status == 'exited':
             self.container.start()
-
         config = self.container.attrs['Config']
         for env_var in config['Env']:
             if env_var.startswith('port='):
@@ -571,21 +597,26 @@ class DockerRuntime(ActionExecutionClient):
         )
 
     @tenacity.retry(
-        stop=tenacity.stop_after_delay(120) | stop_if_should_exit(),
+        stop=tenacity.stop_after_delay(300) | stop_if_should_exit(),
         retry=tenacity.retry_if_exception(_is_retryablewait_until_alive_error),
         reraise=True,
-        wait=tenacity.wait_fixed(2),
+        wait=tenacity.wait_fixed(5),
     )
     def wait_until_alive(self) -> None:
         try:
             container = self.docker_client.containers.get(self.container_name)
-            if container.status == 'exited':
-                raise AgentRuntimeDisconnectedError(
-                    f'Container {self.container_name} has exited.'
-                )
-        except docker.errors.NotFound:
+        except NotFound as exc:
+            self._recreate_container_if_not_found(
+                exc, f'Container {self.container_name} not found.'
+            )
+            container = self.container
+        if not container:
             raise AgentRuntimeNotFoundError(
                 f'Container {self.container_name} not found.'
+            )
+        if container.status == 'exited':
+            raise AgentRuntimeDisconnectedError(
+                f'Container {self.container_name} has exited.'
             )
 
         self.check_if_alive()
@@ -633,7 +664,7 @@ class DockerRuntime(ActionExecutionClient):
         self._app_port_locks.clear()
 
     def _is_port_in_use_docker(self, port: int) -> bool:
-        containers = self.docker_client.containers.list()
+        containers = self.docker_client.containers.list(ignore_removed=True)
         for container in containers:
             container_ports = container.ports
             if str(port) in str(container_ports):
@@ -748,9 +779,9 @@ class DockerRuntime(ActionExecutionClient):
             container_name = CONTAINER_NAME_PREFIX + conversation_id
             container = docker_client.containers.get(container_name)
             container.remove(force=True)
-        except docker.errors.APIError:
+        except APIError:
             pass
-        except docker.errors.NotFound:
+        except NotFound:
             pass
         finally:
             docker_client.close()

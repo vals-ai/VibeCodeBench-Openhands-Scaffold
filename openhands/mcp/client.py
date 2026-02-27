@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional
+from typing import Any, ClassVar
 
 from fastmcp import Client
 from fastmcp.client.transports import (
@@ -24,13 +24,13 @@ from openhands.mcp.tool import MCPClientTool
 class MCPClient(BaseModel):
     """A collection of tools that connects to an MCP server and manages available tools through the Model Context Protocol."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
 
-    client: Optional[Client] = None
+    client: Client[Any] | None = None
     description: str = 'MCP client tools for server interaction'
     tools: list[MCPClientTool] = Field(default_factory=list)
     tool_map: dict[str, MCPClientTool] = Field(default_factory=dict)
-    server_timeout: Optional[float] = None  # Timeout from server config for tool calls
+    server_timeout: float | None = None  # Timeout from server config for tool calls
 
     async def _initialize_and_list_tools(self) -> None:
         """Initialize session and populate tool map."""
@@ -146,7 +146,7 @@ class MCPClient(BaseModel):
             )
             raise
 
-    async def call_tool(self, tool_name: str, args: dict) -> CallToolResult:
+    async def call_tool(self, tool_name: str, args: dict[str, Any]) -> CallToolResult:
         """Call a tool on the MCP server with timeout from server configuration.
 
         Args:

@@ -255,7 +255,7 @@ class ConversationMemory:
             )
 
             llm_response: ModelResponse = tool_metadata.model_response
-            assistant_msg = getattr(llm_response.choices[0], 'message')
+            assistant_msg = llm_response.choices[0].message
 
             # Add the LLM message (assistant) that initiated the tool calls
             # (overwrites any previous message with the same response_id)
@@ -277,9 +277,7 @@ class ConversationMemory:
             tool_metadata = action.tool_call_metadata
             if tool_metadata is not None:
                 # take the response message from the tool call
-                assistant_msg = getattr(
-                    tool_metadata.model_response.choices[0], 'message'
-                )
+                assistant_msg = tool_metadata.model_response.choices[0].message
                 content = assistant_msg.content or ''
 
                 # save content if any, to thought
@@ -301,7 +299,9 @@ class ConversationMemory:
             ]
         elif isinstance(action, MessageAction):
             role = 'user' if action.source == 'user' else 'assistant'
-            content = [TextContent(text=action.content or '')]
+            content: list[TextContent | ImageContent] = []
+            if action.content and action.content.strip():
+                content.append(TextContent(text=action.content))
             if action.image_urls:
                 if role == 'user':
                     for idx, url in enumerate(action.image_urls):
@@ -311,6 +311,8 @@ class ConversationMemory:
                         content.append(ImageContent(image_urls=[url]))
                 else:
                     content.append(ImageContent(image_urls=action.image_urls))
+            if not content:
+                return []
             if role not in ('user', 'system', 'assistant', 'tool'):
                 raise ValueError(f'Invalid role: {role}')
             return [
@@ -331,15 +333,37 @@ class ConversationMemory:
             ]
         elif isinstance(action, SystemMessageAction):
             # Convert SystemMessageAction to a system message
+            if not action.content or not action.content.strip():
+                return []
             return [
                 Message(
                     role='system',
                     content=[TextContent(text=action.content)],
-                    # Include tools if function calling is enabled
-                    tool_calls=None,
+                    tool_calls=[],
                 )
             ]
         return []
+
+    def _handle_empty_content_with_tool_metadata(
+        self,
+        obs: Observation,
+        tool_call_id_to_message: dict[str, Message],
+    ) -> bool:
+        """Handle empty content when tool_call_metadata is present.
+
+        Returns:
+            True if handled (should return empty list), False otherwise
+        """
+        tool_call_metadata = getattr(obs, 'tool_call_metadata', None)
+        if tool_call_metadata is not None:
+            tool_call_id_to_message[tool_call_metadata.tool_call_id] = Message(
+                role='tool',
+                content=[],
+                tool_call_id=tool_call_metadata.tool_call_id,
+                name=tool_call_metadata.function_name,
+            )
+            return True
+        return False
 
     def _process_observation(
         self,
@@ -413,8 +437,10 @@ class ConversationMemory:
             text = '\n'.join(splitted)
             text = truncate_content(text, max_message_chars)
 
-            # Create message content with text
-            content: list[TextContent | ImageContent] = [TextContent(text=text)]
+            # Create message content with text (only if non-empty)
+            content: list[TextContent | ImageContent] = []
+            if text and text.strip():
+                content.append(TextContent(text=text))
 
             # Add image URLs if available
             if obs.image_urls:
@@ -426,8 +452,13 @@ class ConversationMemory:
 
                 if valid_image_urls:
                     content.append(ImageContent(image_urls=valid_image_urls))
-                    # Only add explanatory text if vision is active
-                    if vision_is_active and invalid_count > 0:
+                    # Only add explanatory text if vision is active and we have text content
+                    if (
+                        vision_is_active
+                        and invalid_count > 0
+                        and content
+                        and isinstance(content[0], TextContent)
+                    ):
                         # Add text indicating some images were filtered
                         content[
                             0
@@ -436,13 +467,22 @@ class ConversationMemory:
                     logger.debug(
                         'IPython observation has image URLs but none are valid'
                     )
-                    # Only add explanatory text if vision is active
-                    if vision_is_active:
+                    # Only add explanatory text if vision is active and we have text content
+                    if (
+                        vision_is_active
+                        and content
+                        and isinstance(content[0], TextContent)
+                    ):
                         # Add text indicating all images were filtered
                         content[
                             0
                         ].text += f'\n\nNote: All {len(obs.image_urls)} image(s) in this output were invalid or empty and have been filtered. The agent should use alternative methods to access visual information.'  # type: ignore[union-attr]
 
+            if not content:
+                self._handle_empty_content_with_tool_metadata(
+                    obs, tool_call_id_to_message
+                )
+                return []
             message = Message(role='user', content=content)
         elif isinstance(obs, FileEditObservation):
             text = truncate_content(str(obs), max_message_chars)
@@ -453,7 +493,7 @@ class ConversationMemory:
             )  # Content is already truncated by openhands-aci
         elif isinstance(obs, BrowserOutputObservation):
             text = obs.content
-            content = [TextContent(text=text)]
+            content: list[TextContent | ImageContent] = [TextContent(text=text)]
             if (
                 obs.trigger_by_action == ActionType.BROWSE_INTERACTIVE
                 and enable_som_visual_browsing

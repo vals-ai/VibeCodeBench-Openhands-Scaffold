@@ -1,6 +1,14 @@
 {
-    // force *nix line endings so files don't look modified in container run from Windows clone
     "files.eol": "\n",
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
+    "python.defaultInterpreterPath": "./.venv/bin/python",
+    "ruff.path": [".venv/bin/ruff"],
+    "ruff.importStrategy": "fromEnvironment",
+    "ruff.configuration": "dev_config/python/ruff.toml",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit",
+        "source.fixAll.ruff": "explicit"
+    },
 }
