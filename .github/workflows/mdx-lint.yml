@@ -22,7 +22,7 @@ jobs:
     name: Lint MDX files
     runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Node.js 22
         uses: useblacksmith/setup-node@v5
