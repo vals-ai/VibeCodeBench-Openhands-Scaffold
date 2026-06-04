@@ -68,6 +68,8 @@ class Agent(ABC):
         """
 
         try:
+            from openhands.events.action.message import SystemMessageAction
+
             if not self.prompt_manager:
                 logger.warning(
                     f'[{self.name}] Prompt manager not initialized before getting system message'
