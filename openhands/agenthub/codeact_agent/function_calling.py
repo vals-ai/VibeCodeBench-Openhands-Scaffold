@@ -524,9 +524,10 @@ def response_to_actions(
             )
             actions.append(action)
     else:
+        content = response.output_text or response.reasoning or ''
         actions.append(
             MessageAction(
-                content=str(response.output_text) if response.output_text else '',
+                content=str(content),
                 wait_for_response=True,
             )
         )
@@ -536,7 +537,18 @@ def response_to_actions(
     # and actions with tool calls (e.g. CmdRunAction, IPythonRunCellAction, etc.)
     # with the token usage data
     for action in actions:
-        response_id = response.raw.get('id') if response.raw else None
+        raw_response = None
+        try:
+            raw_response = response.raw
+        except AttributeError:
+            pass
+
+        response_id = raw_response.get('id') if raw_response else None
+        if response_id is None:
+            try:
+                response_id = response.extras.response_id
+            except AttributeError:
+                pass
         action.response_id = response_id
 
     assert len(actions) >= 1

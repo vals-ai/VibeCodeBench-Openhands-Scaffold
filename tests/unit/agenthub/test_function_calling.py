@@ -1,10 +1,10 @@
 """Test function calling module."""
 
-import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from litellm import ModelResponse
+from model_library.base import QueryResult, ToolCall
 
 from openhands.agenthub.codeact_agent.function_calling import response_to_actions
 from openhands.core.exceptions import FunctionCallValidationError
@@ -18,30 +18,17 @@ from openhands.events.action import (
 from openhands.events.event import FileEditSource, FileReadSource
 
 
-def create_mock_response(function_name: str, arguments: dict) -> ModelResponse:
+def create_mock_response(function_name: str, arguments: dict) -> QueryResult:
     """Helper function to create a mock response with a tool call."""
-    return ModelResponse(
-        id='mock-id',
-        choices=[
-            {
-                'message': {
-                    'tool_calls': [
-                        {
-                            'function': {
-                                'name': function_name,
-                                'arguments': json.dumps(arguments),
-                            },
-                            'id': 'mock-tool-call-id',
-                            'type': 'function',
-                        }
-                    ],
-                    'content': None,
-                    'role': 'assistant',
-                },
-                'index': 0,
-                'finish_reason': 'tool_calls',
-            }
+    return QueryResult(
+        tool_calls=[
+            ToolCall(
+                id='mock-tool-call-id',
+                name=function_name,
+                args=arguments,
+            )
         ],
+        raw={'id': 'mock-id'},
     )
 
 
@@ -219,28 +206,15 @@ def test_browser_missing_code():
 
 def test_invalid_json_arguments():
     """Test handling of invalid JSON in arguments."""
-    response = ModelResponse(
-        id='mock-id',
-        choices=[
-            {
-                'message': {
-                    'tool_calls': [
-                        {
-                            'function': {
-                                'name': 'execute_bash',
-                                'arguments': 'invalid json',
-                            },
-                            'id': 'mock-tool-call-id',
-                            'type': 'function',
-                        }
-                    ],
-                    'content': None,
-                    'role': 'assistant',
-                },
-                'index': 0,
-                'finish_reason': 'tool_calls',
-            }
+    response = QueryResult(
+        tool_calls=[
+            ToolCall(
+                id='mock-tool-call-id',
+                name='execute_bash',
+                args='invalid json',
+            )
         ],
+        raw={'id': 'mock-id'},
     )
     with pytest.raises(FunctionCallValidationError) as exc_info:
         response_to_actions(response)
@@ -272,3 +246,44 @@ def test_unexpected_argument_handling():
     # Verify the error message mentions the unexpected argument
     assert 'old_str_prefix' in str(exc_info.value)
     assert 'Unexpected argument' in str(exc_info.value)
+
+
+def _message_response(**attrs):
+    base = {'tool_calls': [], 'output_text': 'done', 'reasoning': None}
+    base.update(attrs)
+    return SimpleNamespace(**base)
+
+
+def test_response_id_prefers_raw_over_extras():
+    response = _message_response(
+        raw={'id': 'from-raw'},
+        extras=SimpleNamespace(response_id='from-extras'),
+    )
+
+    actions = response_to_actions(response)
+
+    assert actions[0].response_id == 'from-raw'
+
+
+def test_response_id_falls_back_to_extras_response_id():
+    response = _message_response(extras=SimpleNamespace(response_id='from-extras'))
+
+    actions = response_to_actions(response)
+
+    assert actions[0].response_id == 'from-extras'
+
+
+def test_response_id_none_when_no_raw_attribute():
+    response = _message_response()
+
+    actions = response_to_actions(response)
+
+    assert actions[0].response_id is None
+
+
+def test_reasoning_becomes_message_when_output_text_missing():
+    response = QueryResult(reasoning='Need to inspect the app before acting.')
+
+    actions = response_to_actions(response)
+
+    assert actions[0].content == 'Need to inspect the app before acting.'
