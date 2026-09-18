@@ -33,6 +33,21 @@
 
 Welcome to OpenHands (formerly OpenDevin), a platform for software development agents powered by AI.
 
+This scaffold uses `model-library==0.1.30` from PyPI. No checkout of the
+internal model-proxy repository is required. Configure credentials for your
+selected model provider.
+
+Install the scaffold and model library with Python 3.12:
+
+```bash
+uv venv --python 3.12
+uv pip install --overrides requirements-overrides.txt -e . -r requirements-model-library.txt
+```
+
+The overrides resolve conflicting requirements from AI21 and Browser Use.
+They select the OpenHands SDK's Tenacity version and model-library's provider
+SDK versions. AI21 provider compatibility is not verified.
+
 OpenHands agents can do anything a human developer can: modify code, run commands, browse the web,
 call APIs, and yes—even copy code snippets from StackOverflow.
 
@@ -77,7 +92,7 @@ make start-frontend         # Frontend only (port 3001)
 ```bash
 source .venv/bin/activate
 uv pip install --upgrade package-name    # Update specific package
-uv pip install --upgrade -e .            # Update all packages
+uv pip install --overrides requirements-overrides.txt -e . -r requirements-model-library.txt
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to use OpenHands.

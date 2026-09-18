@@ -154,6 +154,8 @@ install-python-dependencies:
 	else \
 		poetry install --with dev,test,runtime; \
 	fi
+	poetry run pip install uv
+	poetry run uv pip install --overrides requirements-overrides.txt -r requirements-model-library.txt
 	@if [ "${INSTALL_PLAYWRIGHT}" != "false" ] && [ "${INSTALL_PLAYWRIGHT}" != "0" ]; then \
 		if [ -f "/etc/manjaro-release" ]; then \
 			echo "$(BLUE)Detected Manjaro Linux. Installing Playwright dependencies...$(RESET)"; \

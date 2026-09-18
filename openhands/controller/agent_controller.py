@@ -535,24 +535,11 @@ class AgentController:
             return
 
         elif isinstance(action, AgentFinishAction):
-            self._complete_terminal_tool_call(action)
             self.state.outputs = action.outputs
             await self.set_agent_state_to(AgentState.FINISHED)
         elif isinstance(action, AgentRejectAction):
-            self._complete_terminal_tool_call(action)
             self.state.outputs = action.outputs
             await self.set_agent_state_to(AgentState.REJECTED)
-
-    def _complete_terminal_tool_call(
-        self, action: AgentFinishAction | AgentRejectAction
-    ) -> None:
-        metadata = action.tool_call_metadata
-        if metadata is None:
-            return
-        tool_call = self.state.pending_tool_calls.pop(metadata.tool_call_id)
-        self.state.agent_history.append(
-            ToolResult(tool_call=tool_call, result='Agent turn completed.')
-        )
 
     async def _handle_observation(self, observation: Observation) -> None:
         """Handles observation from the event stream.

@@ -48,7 +48,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "poetry"
       - name: Install Python dependencies using Poetry
-        run: poetry install --with dev,test,runtime
+        run: |
+          poetry install --with dev,test,runtime
+          poetry run pip install uv
+          poetry run uv pip install --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Build Environment
         run: make build
       - name: Run Unit Tests
@@ -86,7 +89,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "poetry"
       - name: Install Python dependencies using Poetry
-        run: poetry install --with dev,test,runtime
+        run: |
+          poetry install --with dev,test,runtime
+          poetry run pip install uv
+          poetry run uv pip install --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Run Windows unit tests
         run: poetry run pytest -svv tests/unit/runtime/utils/test_windows_bash.py
         env:
@@ -115,7 +121,10 @@ jobs:
           cache: "poetry"
       - name: Install Python dependencies using Poetry
         working-directory: ./enterprise
-        run: poetry install --with dev,test
+        run: |
+          poetry install --with dev,test
+          poetry run pip install uv
+          poetry run uv pip install --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
       - name: Run Unit Tests
         # Use base working directory for coverage paths to line up.
         run: PYTHONPATH=".:$PYTHONPATH" poetry run --project=enterprise pytest --forked -n auto -s -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark ./enterprise/tests/unit --cov=enterprise --cov-branch

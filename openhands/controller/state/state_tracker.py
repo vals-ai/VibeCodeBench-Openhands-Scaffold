@@ -96,13 +96,6 @@ class StateTracker:
             )
         else:
             self.state = state
-            # A restored turn continues the work but starts its own budget; without
-            # this it inherits the previous turn's count and can begin at the limit.
-            self.state.iteration_flag = IterationControlFlag(
-                limit_increase_amount=max_iterations,
-                current_value=0,
-                max_value=max_iterations,
-            )
 
         if self.state.start_id <= -1:
             self.state.start_id = 0

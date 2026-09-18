@@ -91,12 +91,36 @@ def test_prep_build_folder(temp_dir):
 
     # make sure that the code (openhands/) and microagents folder were copied
     assert shutil_mock.copytree.call_count == 2
-    assert shutil_mock.copy2.call_count == 2
+    assert shutil_mock.copy2.call_count == 4
 
     # Now check dockerfile is in the folder
     dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
     assert os.path.exists(dockerfile_path)
     assert os.path.isfile(dockerfile_path)
+
+
+def test_public_build_excludes_local_model_proxy(tmp_path, monkeypatch):
+    project = tmp_path / 'project'
+    for name in ['openhands', 'microagents', 'model-proxy']:
+        (project / name).mkdir(parents=True)
+    (project / 'model-proxy' / 'private.txt').write_text('private source')
+    files = [
+        'pyproject.toml', 'poetry.lock',
+        'requirements-model-library.txt', 'requirements-overrides.txt',
+    ]
+    for name in files:
+        (project / name).write_text(name)
+    monkeypatch.setattr(openhands, '__file__', str(project / 'openhands' / '__init__.py'))
+    output = tmp_path / 'build'
+
+    prep_build_folder(output, DEFAULT_BASE_IMAGE, BuildFromImageType.SCRATCH, None)
+
+    assert not (output / 'code' / 'model-proxy').exists()
+    for name in files:
+        assert (output / 'code' / name).read_text() == name
+    dockerfile = (output / 'Dockerfile').read_text()
+    assert 'model-proxy' not in dockerfile
+    assert '-r requirements-model-library.txt' in dockerfile
 
 
 def test_get_hash_for_lock_files():

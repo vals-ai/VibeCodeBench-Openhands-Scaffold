@@ -86,6 +86,7 @@ class CodeActAgent(Agent):
 
         # Override with router if needed
         self.llm: LLM = self.llm_registry.get_router(self.config)
+        self.history: list[InputItem] = []
 
     @property
     @override
@@ -190,7 +191,7 @@ class CodeActAgent(Agent):
 
         response = self._query(
             state.inputs,
-            state.agent_history,
+            self.history,
         )
 
         response_text = response.output_text or response.reasoning
@@ -203,7 +204,7 @@ class CodeActAgent(Agent):
             for tool_call in response.tool_calls:
                 self.llm.pretty_print(tool_call)
 
-        state.agent_history = response.history
+        self.history = response.history
 
         state.flush()
 

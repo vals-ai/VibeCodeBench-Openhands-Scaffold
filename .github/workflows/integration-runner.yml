@@ -54,7 +54,10 @@ jobs:
             Hi! I started running the integration tests on your PR. You will receive a comment with the results shortly.
 
       - name: Install Python dependencies using Poetry
-        run: poetry install --with dev,test,runtime,evaluation
+        run: |
+          poetry install --with dev,test,runtime,evaluation
+          poetry run pip install uv
+          poetry run uv pip install --overrides requirements-overrides.txt -r requirements-model-library.txt
 
       - name: Configure config.toml for testing with Haiku
         env:

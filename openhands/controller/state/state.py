@@ -78,7 +78,6 @@ class State:
     budget_flag: BudgetControlFlag | None = None
     confirmation_mode: bool = False
     inputs: list[InputItem] = field(default_factory=list)
-    agent_history: list[InputItem] = field(default_factory=list)
     outputs: dict[str, Any] = field(default_factory=dict)
 
     pending_tool_calls: dict[str, ToolCall] = field(default_factory=dict)
@@ -164,7 +163,6 @@ class State:
 
         # first state after restore
         state.agent_state = AgentState.LOADING
-        state.end_id = -1
 
         # We don't need to clean up deprecated fields here
         # They will be handled by __getstate__ when the state is saved again
@@ -188,8 +186,6 @@ class State:
 
         if not hasattr(self, 'budget_flag'):
             self.budget_flag = None
-        if not hasattr(self, 'agent_history'):
-            self.agent_history = []
 
     def to_llm_metadata(self, model_name: str, agent_name: str) -> dict[str, Any]:
         metadata = {
