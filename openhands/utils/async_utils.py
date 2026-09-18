@@ -74,6 +74,7 @@ async def wait_all(
     if pending:
         for task in pending:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         raise asyncio.TimeoutError()
     results = []
     errors = []

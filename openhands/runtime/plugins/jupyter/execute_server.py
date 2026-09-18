@@ -187,7 +187,7 @@ class JupyterKernel:
                 assert self.ws is not None
                 msg = await self.ws.read_message()
                 if msg is None:
-                    continue
+                    raise ConnectionError('Jupyter kernel websocket closed')
                 msg_dict = json_decode(msg)
                 msg_type = msg_dict['msg_type']
                 parent_msg_id = msg_dict['parent_header'].get('msg_id', None)
@@ -263,13 +263,18 @@ class JupyterKernel:
         return {'text': text_content, 'images': image_outputs}
 
     async def shutdown_async(self) -> None:
-        if self.kernel_id:
-            client = AsyncHTTPClient()
-            await client.fetch(
-                '{}/api/kernels/{}'.format(self.base_url, self.kernel_id),
-                method='DELETE',
-            )
+        try:
+            if self.kernel_id:
+                client = AsyncHTTPClient()
+                await client.fetch(
+                    '{}/api/kernels/{}'.format(self.base_url, self.kernel_id),
+                    method='DELETE',
+                )
+        finally:
             self.kernel_id = None
+            if self.heartbeat_callback:
+                self.heartbeat_callback.stop()
+                self.heartbeat_callback = None
             if self.ws:
                 self.ws.close()
                 self.ws = None

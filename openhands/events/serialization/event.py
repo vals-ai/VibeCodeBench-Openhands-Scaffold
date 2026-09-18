@@ -3,14 +3,23 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from model_library.base import QueryResult
+from pydantic import BaseModel, TypeAdapter
 
 from openhands.events import Event, EventSource
 from openhands.events.serialization.action import action_from_dict
 from openhands.events.serialization.observation import observation_from_dict
 from openhands.events.serialization.utils import remove_fields
 from openhands.events.tool import ToolCallMetadata
-from openhands.llm.metrics import Cost, Metrics, ResponseLatency, TokenUsage
+from openhands.llm.metrics import (
+    Cost,
+    Metrics,
+    ResponseLatency,
+    TokenUsage,
+    UsageAccountingVersion,
+)
+
+_USAGE_ACCOUNTING_ADAPTER = TypeAdapter(UsageAccountingVersion)
 
 # TODO: move `content` into `extras`
 TOP_KEYS = [
@@ -22,6 +31,8 @@ TOP_KEYS = [
     'action',
     'observation',
     'tool_call_metadata',
+    'model_response',
+    'response_id',
     'llm_metrics',
 ]
 UNDERSCORE_KEYS = [
@@ -30,6 +41,8 @@ UNDERSCORE_KEYS = [
     'source',
     'cause',
     'tool_call_metadata',
+    'model_response',
+    'response_id',
     'llm_metrics',
 ]
 
@@ -66,6 +79,12 @@ def event_from_dict(data: dict[str, Any]) -> 'Event':
                 value = EventSource(value)
             if key == 'tool_call_metadata':
                 value = ToolCallMetadata(**value)
+            if key == 'model_response':
+                if not isinstance(value, dict):
+                    raise TypeError('model_response must be a dictionary')
+                value = QueryResult.model_validate(value)
+            if key == 'response_id' and not isinstance(value, str):
+                raise TypeError('response_id must be a string')
             if key == 'llm_metrics':
                 metrics = Metrics()
                 if isinstance(value, dict):
@@ -86,6 +105,14 @@ def event_from_dict(data: dict[str, Any]) -> 'Event':
                         metrics._accumulated_token_usage = TokenUsage(
                             **value.get('accumulated_token_usage', {})
                         )
+                    if 'usage_accounting' in value:
+                        metrics._usage_accounting = (
+                            _USAGE_ACCOUNTING_ADAPTER.validate_python(
+                                value['usage_accounting']
+                            )
+                        )
+                    else:
+                        metrics._usage_accounting = None
                 value = metrics
             setattr(evt, '_' + key, value)
     return evt
@@ -116,6 +143,16 @@ def event_to_dict(event: 'Event') -> dict[str, Any]:
             d['recall_type'] = d['recall_type'].value
         if key == 'tool_call_metadata' and 'tool_call_metadata' in d:
             d['tool_call_metadata'] = d['tool_call_metadata'].model_dump()
+        if key == 'model_response' and 'model_response' in d:
+            model_response = d['model_response']
+            if not isinstance(model_response, QueryResult):
+                raise TypeError('model_response must be a QueryResult')
+            d['model_response'] = model_response.model_dump(
+                exclude={'history', 'raw'}
+            )
+        if key == 'response_id' and 'response_id' in d:
+            if not isinstance(d['response_id'], str):
+                raise TypeError('response_id must be a string')
         if key == 'llm_metrics' and 'llm_metrics' in d:
             d['llm_metrics'] = d['llm_metrics'].get()
         props.pop(key, None)

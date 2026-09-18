@@ -6,16 +6,18 @@ from asyncio import (
 )
 from collections.abc import Coroutine
 from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from threading import Lock, Thread
-from typing import Any
+from typing import Any, TypeVar
 
-from model_library.base import LLM, QueryResult
+from model_library.base import LLM
 from model_library.base import LLMConfig as ValsLLMConfig
 from model_library.registry_utils import get_registry_model
 
 from openhands.core.config.llm_config import LLMConfig
 
 MILLION_TOKENS = 1000000
+T = TypeVar("T")
 
 def fetch_registry_model(llm_config: LLMConfig) -> LLM:
     try:
@@ -90,8 +92,12 @@ class PersistentEventLoopRunner:
             self._loop = loop
             self._thread = thread
 
-    def run(self, coro: Coroutine[Any, Any, QueryResult]) -> QueryResult:
+    def run(self, coro: Coroutine[Any, Any, T], timeout: int) -> T:
         self._ensure_started()
         assert self._loop is not None
-        fut: Future[QueryResult] = run_coroutine_threadsafe(coro, self._loop)
-        return fut.result()
+        fut: Future[T] = run_coroutine_threadsafe(coro, self._loop)
+        try:
+            return fut.result(timeout=timeout)
+        except FutureTimeoutError as e:
+            fut.cancel()
+            raise TimeoutError(f"Model query timed out after {timeout} seconds") from e

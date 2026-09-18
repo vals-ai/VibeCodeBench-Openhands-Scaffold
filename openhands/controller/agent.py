@@ -5,19 +5,21 @@ from typing import TYPE_CHECKING
 
 from model_library.base import ToolDefinition
 
+from openhands.events.action.message import SystemMessageAction
 from openhands.llm.llm import LLM
 from openhands.llm.llm_registry import LLMRegistry
 
 if TYPE_CHECKING:
     from openhands.controller.state.state import State
     from openhands.events.action import Action
-    from openhands.events.action.message import SystemMessageAction
     from openhands.utils.prompt import PromptManager
 
 from openhands.core.config import AgentConfig
 from openhands.core.exceptions import (
     AgentAlreadyRegisteredError,
     AgentNotRegisteredError,
+    FunctionCallNotExistsError,
+    FunctionCallValidationError,
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.event import EventSource
@@ -51,6 +53,9 @@ class Agent(ABC):
         self._prompt_manager: PromptManager | None = None
         self.mcp_tools: dict[str, ToolDefinition] = {}
         self.tools: list[ToolDefinition] = []
+        self.pending_tool_call_errors: list[
+            FunctionCallValidationError | FunctionCallNotExistsError
+        ] = []
 
     @property
     def prompt_manager(self) -> 'PromptManager':
@@ -109,6 +114,7 @@ class Agent(ABC):
         """Resets the agent's execution status."""
         # Only reset the completion status, not the LLM metrics
         self._complete = False
+        self.pending_tool_call_errors.clear()
 
     @property
     def name(self) -> str:

@@ -1,4 +1,5 @@
 import copy
+import math
 import os
 from typing import Any, Callable, cast, override
 
@@ -11,6 +12,7 @@ from model_library.base import (
 from tokenizers import Tokenizer
 
 from openhands.core.config.llm_config import LLMConfig
+from openhands.core.exceptions import LLMContextWindowExceedError
 from openhands.core.logger import openhands_logger as logger
 from openhands.llm.metrics import Metrics
 from openhands.llm.utils import (
@@ -21,6 +23,18 @@ from openhands.llm.utils import (
 _persistent_loop: PersistentEventLoopRunner | None = None
 
 MESSAGE_SEPARATOR = "\n\n----------\n\n"
+
+
+def _is_model_library_max_context_window_error(error: Exception) -> bool:
+    error_type = type(error)
+    return error_type.__module__ == 'model_library.exceptions' and (
+        error_type.__name__ == 'MaxContextWindowExceededError'
+        or (
+            error_type.__name__ == 'GatewayProviderError'
+            and getattr(error, 'exception_type', None)
+            == 'MaxContextWindowExceededError'
+        )
+    )
 
 
 class DebugMixin:
@@ -74,7 +88,15 @@ class LLM(DebugMixin):
 
         self.tokenizer: Tokenizer | None = None
 
-        model = fetch_registry_model(self.config)
+        global _persistent_loop
+        if _persistent_loop is None:
+            _persistent_loop = PersistentEventLoopRunner()
+
+        async def _init_model() -> ValsLLM:
+            return fetch_registry_model(self.config)
+
+        assert self.config.timeout is not None
+        model = _persistent_loop.run(_init_model(), timeout=self.config.timeout)
 
         self.pretty_print(f"[Model] {model}")
 
@@ -85,11 +107,6 @@ class LLM(DebugMixin):
             input = cast(list[InputItem], kwargs.pop("input", []))
             history = cast(list[InputItem], kwargs.pop("history", []))
             tools = cast(list[ToolDefinition], kwargs.pop("tools", []))
-
-            global _persistent_loop
-            if _persistent_loop is None:
-                _persistent_loop = PersistentEventLoopRunner()
-
             async def _query_llm() -> QueryResult:
                 query_result: QueryResult = await self.model.query(
                     input=input,
@@ -100,22 +117,31 @@ class LLM(DebugMixin):
 
                 return query_result
 
-            query_result = _persistent_loop.run(_query_llm())
+            try:
+                query_result = _persistent_loop.run(
+                    _query_llm(), timeout=self.config.timeout
+                )
+            except Exception as error:
+                if _is_model_library_max_context_window_error(error):
+                    raise LLMContextWindowExceedError(str(error)) from error
+                raise
 
             metadata = query_result.metadata
 
             self.metrics.add_response_latency(metadata.duration_seconds or 0, "")
 
-            cost = metadata.cost.total if metadata.cost else 0
-
-            self.pretty_print(
-                "[Turn Cost] ${:.6f}\n[Turn Usage] {:}".format(cost, str(metadata))
-            )
+            cost = metadata.cost.total if metadata.cost else None
+            turn_cost = f'${cost:.6f}' if cost is not None else 'unknown'
+            self.pretty_print(f'[Turn Cost] {turn_cost}\n[Turn Usage] {metadata}')
             self.metrics.add_cost(cost)
 
+            reasoning_tokens = metadata.reasoning_tokens
+            if reasoning_tokens is None and not self.model.reasoning:
+                reasoning_tokens = 0
             self.metrics.add_token_usage(
                 prompt_tokens=metadata.in_tokens,
                 completion_tokens=metadata.out_tokens,
+                reasoning_tokens=reasoning_tokens,
                 cache_read_tokens=metadata.cache_read_tokens or 0,
                 cache_write_tokens=metadata.cache_write_tokens or 0,
                 context_window=0,

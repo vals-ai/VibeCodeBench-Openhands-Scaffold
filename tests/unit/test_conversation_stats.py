@@ -119,6 +119,7 @@ def test_get_combined_metrics(conversation_stats):
     metrics1.add_token_usage(
         prompt_tokens=100,
         completion_tokens=50,
+        reasoning_tokens=None,
         cache_read_tokens=0,
         cache_write_tokens=0,
         context_window=8000,
@@ -131,6 +132,7 @@ def test_get_combined_metrics(conversation_stats):
     metrics2.add_token_usage(
         prompt_tokens=200,
         completion_tokens=100,
+        reasoning_tokens=None,
         cache_read_tokens=0,
         cache_write_tokens=0,
         context_window=4000,
@@ -265,6 +267,7 @@ def test_llm_registry_notifications(connected_registry_and_stats):
     llm.metrics.add_token_usage(
         prompt_tokens=100,
         completion_tokens=50,
+        reasoning_tokens=None,
         cache_read_tokens=0,
         cache_write_tokens=0,
         context_window=8000,
@@ -326,6 +329,7 @@ def test_multiple_llm_services(connected_registry_and_stats):
     llm1.metrics.add_token_usage(
         prompt_tokens=100,
         completion_tokens=50,
+        reasoning_tokens=None,
         cache_read_tokens=0,
         cache_write_tokens=0,
         context_window=8000,
@@ -336,6 +340,7 @@ def test_multiple_llm_services(connected_registry_and_stats):
     llm2.metrics.add_token_usage(
         prompt_tokens=200,
         completion_tokens=100,
+        reasoning_tokens=None,
         cache_read_tokens=0,
         cache_write_tokens=0,
         context_window=4000,
@@ -439,6 +444,7 @@ def test_save_and_restore_workflow(mock_file_store):
     metrics.add_token_usage(
         prompt_tokens=100,
         completion_tokens=50,
+        reasoning_tokens=None,
         cache_read_tokens=0,
         cache_write_tokens=0,
         context_window=8000,

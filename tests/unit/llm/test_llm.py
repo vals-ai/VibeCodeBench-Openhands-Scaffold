@@ -89,8 +89,12 @@ def test_metrics_merge_accumulated_token_usage():
     metrics2 = Metrics(model_name='model2')
 
     # Add token usage to each
-    metrics1.add_token_usage(10, 5, 3, 2, 1000, 'response-1')
-    metrics2.add_token_usage(8, 6, 2, 4, 1000, 'response-2')
+    metrics1.add_token_usage(
+        10, 5, 3, 2, 1000, 'response-1', reasoning_tokens=None
+    )
+    metrics2.add_token_usage(
+        8, 6, 2, 4, 1000, 'response-2', reasoning_tokens=None
+    )
 
     # Verify initial accumulated token usage
     metrics1_data = metrics1.get()

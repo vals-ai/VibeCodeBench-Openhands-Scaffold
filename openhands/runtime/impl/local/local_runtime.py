@@ -1,5 +1,6 @@
 """This runtime runs the action_execution_server directly on the local machine without Docker."""
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -64,6 +65,14 @@ _RUNNING_SERVERS: dict[str, ActionExecutionServerInfo] = {}
 
 # Global list to track warm servers waiting for use
 _WARM_SERVERS: list[ActionExecutionServerInfo] = []
+
+
+class ActionExecutionServerStartupError(RuntimeError):
+    """Non-retriable startup failure for the local action execution server."""
+
+
+LOCAL_RUNTIME_STARTUP_MAX_ATTEMPTS = 2
+LOCAL_RUNTIME_STARTUP_RETRY_DELAY_SECONDS = 2
 
 
 def get_user_info() -> tuple[int, str | None]:
@@ -217,6 +226,7 @@ class LocalRuntime(ActionExecutionClient):
     async def connect(self) -> None:
         """Start the action_execution_server on the local machine or connect to an existing one."""
         self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
+        needs_wait_for_alive = True
 
         # Get environment variables for warm server configuration
         desired_num_warm_servers = int(os.getenv('DESIRED_NUM_WARM_SERVERS', '0'))
@@ -326,46 +336,76 @@ class LocalRuntime(ActionExecutionClient):
 
             # If no warm server is available, start a new one
             if not warm_server_available:
-                # Create a new server
-                server_info, api_url = _create_server(
-                    config=self.config,
-                    plugins=self.plugins,
-                    workspace_prefix=self.sid,
-                )
+                startup_error: ActionExecutionServerStartupError | None = None
+                for attempt in range(1, LOCAL_RUNTIME_STARTUP_MAX_ATTEMPTS + 1):
+                    if attempt > 1:
+                        self.log(
+                            'warning',
+                            'Retrying local action server startup '
+                            f'({attempt}/{LOCAL_RUNTIME_STARTUP_MAX_ATTEMPTS}) after startup failure',
+                        )
 
-                # Set instance variables
-                self.server_process = server_info.process
-                self._execution_server_port = server_info.execution_server_port
-                self._vscode_port = server_info.vscode_port
-                self._app_ports = server_info.app_ports
-                self._log_thread = server_info.log_thread
-                self._log_thread_exit_event = server_info.log_thread_exit_event
+                    # Create a new server
+                    server_info, api_url = _create_server(
+                        config=self.config,
+                        plugins=self.plugins,
+                        workspace_prefix=self.sid,
+                    )
 
-                # We need to use the existing temp workspace, not the one created by _create_server
-                if (
-                    server_info.temp_workspace
-                    and server_info.temp_workspace != self._temp_workspace
-                ):
-                    shutil.rmtree(server_info.temp_workspace)
+                    # Set instance variables
+                    self.server_process = server_info.process
+                    self._execution_server_port = server_info.execution_server_port
+                    self._vscode_port = server_info.vscode_port
+                    self._app_ports = server_info.app_ports
+                    self._log_thread = server_info.log_thread
+                    self._log_thread_exit_event = server_info.log_thread_exit_event
 
-                self.api_url = api_url
+                    # We need to use the existing temp workspace, not the one created by _create_server
+                    if (
+                        server_info.temp_workspace
+                        and server_info.temp_workspace != self._temp_workspace
+                    ):
+                        shutil.rmtree(server_info.temp_workspace)
 
-                # Store the server process in the global dictionary with the correct workspace
-                _RUNNING_SERVERS[self.sid] = ActionExecutionServerInfo(
-                    process=self.server_process,
-                    execution_server_port=self._execution_server_port,
-                    vscode_port=self._vscode_port,
-                    app_ports=self._app_ports,
-                    log_thread=self._log_thread,
-                    log_thread_exit_event=self._log_thread_exit_event,
-                    temp_workspace=self._temp_workspace,
-                    workspace_mount_path=self.config.workspace_mount_path_in_sandbox,
-                )
+                    self.api_url = api_url
 
-        self.log('info', f'Waiting for server to become ready at {self.api_url}...')
-        self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
+                    # Store the server process in the global dictionary with the correct workspace
+                    _RUNNING_SERVERS[self.sid] = ActionExecutionServerInfo(
+                        process=self.server_process,
+                        execution_server_port=self._execution_server_port,
+                        vscode_port=self._vscode_port,
+                        app_ports=self._app_ports,
+                        log_thread=self._log_thread,
+                        log_thread_exit_event=self._log_thread_exit_event,
+                        temp_workspace=self._temp_workspace,
+                        workspace_mount_path=self.config.workspace_mount_path_in_sandbox,
+                    )
 
-        await call_sync_from_async(self._wait_until_alive)
+                    self.log('info', f'Waiting for server to become ready at {self.api_url}...')
+                    self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
+
+                    try:
+                        await call_sync_from_async(self._wait_until_alive)
+                        startup_error = None
+                        break
+                    except ActionExecutionServerStartupError as exc:
+                        startup_error = exc
+                        self.log(
+                            'warning',
+                            f'Local action server startup failed on attempt {attempt}: {exc}',
+                        )
+                        self._cleanup_failed_startup_server()
+                        if attempt < LOCAL_RUNTIME_STARTUP_MAX_ATTEMPTS:
+                            await asyncio.sleep(LOCAL_RUNTIME_STARTUP_RETRY_DELAY_SECONDS)
+
+                if startup_error is not None:
+                    raise startup_error
+                needs_wait_for_alive = False
+
+        if needs_wait_for_alive:
+            self.log('info', f'Waiting for server to become ready at {self.api_url}...')
+            self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
+            await call_sync_from_async(self._wait_until_alive)
 
         if not self.attach_to_existing:
             await call_sync_from_async(self.setup_initial_env)
@@ -391,6 +431,32 @@ class LocalRuntime(ActionExecutionClient):
             for _ in range(num_to_create):
                 _create_warm_server_in_background(self.config, self.plugins)
 
+    def _cleanup_failed_startup_server(self) -> None:
+        if self.sid in _RUNNING_SERVERS:
+            del _RUNNING_SERVERS[self.sid]
+
+        if self.server_process:
+            self.server_process.terminate()
+            try:
+                self.server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.server_process.kill()
+                self.server_process.wait(timeout=5)
+
+        if hasattr(self, '_log_thread_exit_event') and self._log_thread_exit_event:
+            self._log_thread_exit_event.set()
+
+        if hasattr(self, '_log_thread') and self._log_thread:
+            self._log_thread.join(timeout=5)
+
+        self.server_process = None
+        self._execution_server_port = -1
+        self._vscode_port = -1
+        self._app_ports = []
+        self.api_url = (
+            f'{self.config.sandbox.local_runtime_url}:{self._execution_server_port}'
+        )
+
     @classmethod
     def setup(cls, config: OpenHandsConfig, headless_mode: bool = False):
         should_check_dependencies = os.getenv('SKIP_DEPENDENCY_CHECK', '') != '1'
@@ -412,6 +478,7 @@ class LocalRuntime(ActionExecutionClient):
                 _create_warm_server(config, plugins)
 
     @tenacity.retry(
+        retry=tenacity.retry_if_not_exception_type(ActionExecutionServerStartupError),
         wait=tenacity.wait_fixed(2),
         stop=(tenacity.stop_after_delay(600) | stop_if_should_exit()),
         before_sleep=lambda retry_state: logger.debug(
@@ -421,12 +488,16 @@ class LocalRuntime(ActionExecutionClient):
     def _wait_until_alive(self) -> bool:
         """Wait until the server is ready to accept requests."""
         if self.server_process and self.server_process.poll() is not None:
-            raise RuntimeError('Server process died')
+            raise ActionExecutionServerStartupError(
+                'Server process died during startup'
+            )
 
         try:
             response = self.session.get(f'{self.api_url}/alive')
             response.raise_for_status()
             return True
+        except ActionExecutionServerStartupError:
+            raise
         except Exception as e:
             self.log('debug', f'Server not ready yet: {e}')
             raise

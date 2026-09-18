@@ -1,10 +1,17 @@
 """Test function calling module."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from litellm import ModelResponse
+from model_library.base import (
+    QueryResult,
+    QueryResultExtras,
+    QueryResultMetadata,
+    ToolCall,
+)
 
 from openhands.agenthub.codeact_agent.function_calling import response_to_actions
 from openhands.core.exceptions import FunctionCallValidationError
@@ -16,6 +23,7 @@ from openhands.events.action import (
     IPythonRunCellAction,
 )
 from openhands.events.event import FileEditSource, FileReadSource
+from openhands.events.serialization import event_to_dict
 
 
 def create_mock_response(function_name: str, arguments: dict) -> ModelResponse:
@@ -42,6 +50,65 @@ def create_mock_response(function_name: str, arguments: dict) -> ModelResponse:
                 'finish_reason': 'tool_calls',
             }
         ],
+    )
+
+
+def test_reasoning_only_response_uses_reasoning_as_message_content():
+    response = QueryResult(reasoning='Need to inspect the app before acting.')
+
+    actions = response_to_actions(response)
+
+    assert len(actions) == 1
+    assert actions[0].content == 'Need to inspect the app before acting.'
+    assert actions[0].wait_for_response is True
+
+
+def test_message_response_preserves_model_usage_and_response_id():
+    response = QueryResult(
+        output_text='done',
+        metadata=QueryResultMetadata(
+            in_tokens=10,
+            out_tokens=4,
+            reasoning_tokens=3,
+            cache_read_tokens=20,
+            cache_write_tokens=2,
+        ),
+        extras=QueryResultExtras(response_id='provider-response-id'),
+    )
+
+    actions = response_to_actions(response)
+
+    assert actions[0].model_response is response
+    assert actions[0].response_id == 'provider-response-id'
+
+
+def test_tool_response_keeps_model_response_in_tool_metadata_only():
+    response = QueryResult(
+        tool_calls=[
+            ToolCall(
+                id='mock-tool-call-id',
+                name='execute_bash',
+                args=json.dumps(
+                    {
+                        'command': 'ls',
+                        'is_input': 'false',
+                        'security_risk': 'LOW',
+                    }
+                ),
+            )
+        ]
+    )
+
+    actions = response_to_actions(response)
+
+    assert actions[0].model_response is None
+    assert actions[0].tool_call_metadata is not None
+    assert actions[0].tool_call_metadata.model_response is response
+    serialized = event_to_dict(actions[0])
+    assert 'model_response' not in serialized
+    assert (
+        serialized['tool_call_metadata']['model_response']['tool_calls'][0]['id']
+        == 'mock-tool-call-id'
     )
 
 
@@ -272,3 +339,44 @@ def test_unexpected_argument_handling():
     # Verify the error message mentions the unexpected argument
     assert 'old_str_prefix' in str(exc_info.value)
     assert 'Unexpected argument' in str(exc_info.value)
+
+
+def _message_response(**attrs):
+    """Minimal message-style response (no tool calls) for response_id tests."""
+    base = {'tool_calls': [], 'output_text': 'done', 'reasoning': None}
+    base.update(attrs)
+    return SimpleNamespace(**base)
+
+
+def test_response_id_prefers_raw_over_extras():
+    """response.raw['id'] wins over extras.response_id when both are present."""
+    response = _message_response(
+        raw={'id': 'from-raw'},
+        extras=SimpleNamespace(response_id='from-extras'),
+    )
+
+    actions = response_to_actions(response)
+
+    assert actions[0].response_id == 'from-raw'
+
+
+def test_response_id_falls_back_to_extras_response_id():
+    """With no usable raw, response_id comes from extras.response_id."""
+    response = _message_response(extras=SimpleNamespace(response_id='from-extras'))
+
+    actions = response_to_actions(response)
+
+    assert actions[0].response_id == 'from-extras'
+
+
+def test_response_id_none_when_no_raw_attribute():
+    """A QueryResult has no `raw` attribute; this must yield None, not raise.
+
+    Regression for the AttributeError raised by `response.raw` when the
+    response is a model_library QueryResult rather than a LiteLLM response.
+    """
+    response = QueryResult(output_text='done')
+
+    actions = response_to_actions(response)
+
+    assert actions[0].response_id is None

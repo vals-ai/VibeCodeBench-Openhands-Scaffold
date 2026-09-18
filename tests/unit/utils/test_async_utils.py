@@ -64,21 +64,39 @@ async def test_await_all_multi_exception():
 
 @pytest.mark.asyncio
 async def test_await_all_timeout():
-    result = 0
+    cancelled = 0
 
-    # Mock function updates a nonlocal variable after a delay
     async def dummy(value: int):
-        nonlocal result
-        await asyncio.sleep(0.2)
-        result += value
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(0.2)
+        finally:
+            cancelled += 1
 
-    # expect an exception to be raised.
     with pytest.raises(asyncio.TimeoutError):
         await wait_all((dummy(i) for i in range(10)), 0.1)
 
-    # Wait and then check the shared result - this makes sure that pending tasks were cancelled.
-    asyncio.sleep(0.2)
-    assert result == 0
+    assert cancelled == 10
+
+
+@pytest.mark.asyncio
+async def test_await_all_timeout_observes_completed_failures():
+    cancelled = False
+
+    async def fail():
+        raise ValueError('failed before timeout')
+
+    async def wait():
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(1)
+        finally:
+            cancelled = True
+
+    with pytest.raises(asyncio.TimeoutError):
+        await wait_all((fail(), wait()), 0.01)
+
+    assert cancelled
 
 
 @pytest.mark.asyncio

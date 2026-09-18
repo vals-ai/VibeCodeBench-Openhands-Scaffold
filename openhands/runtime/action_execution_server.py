@@ -68,7 +68,7 @@ from openhands.runtime.mcp.proxy import MCPProxyManager
 from openhands.runtime.plugins import ALL_PLUGINS, JupyterPlugin, Plugin, VSCodePlugin
 from openhands.runtime.utils import find_available_tcp_port
 from openhands.runtime.utils.bash import BashSession
-from openhands.runtime.utils.files import insert_lines, read_lines
+from openhands.runtime.utils.files import insert_lines, list_directory, read_lines
 from openhands.runtime.utils.memory_monitor import MemoryMonitor
 from openhands.runtime.utils.runtime_init import init_user_and_working_directory
 from openhands.runtime.utils.system_stats import (
@@ -147,6 +147,13 @@ def _execute_file_editor(
             insert_line=insert_line,
             enable_linting=enable_linting,
         )
+    except IsADirectoryError:
+        if command != 'view':
+            return (
+                f'ERROR:\nPath is a directory: {path}. You can only use directories with view.',
+                (None, None),
+            )
+        return list_directory(Path(path)), (None, None)
     except ToolError as e:
         result = ToolResult(error=e.message)
     except TypeError as e:
@@ -328,13 +335,13 @@ class ActionExecutor:
 
     async def _init_plugin(self, plugin: Plugin):
         assert self.bash_session is not None
+        self.plugins[plugin.name] = plugin
         # VSCode plugin needs runtime_id for path-based routing when using Gateway API
         if isinstance(plugin, VSCodePlugin):
             runtime_id = os.environ.get('RUNTIME_ID')
             await plugin.initialize(self.username, runtime_id=runtime_id)
         else:
             await plugin.initialize(self.username)
-        self.plugins[plugin.name] = plugin
         logger.debug(f'Initializing plugin: {plugin.name}')
 
         if isinstance(plugin, JupyterPlugin):
@@ -501,9 +508,7 @@ class ActionExecutor:
         except UnicodeDecodeError:
             return ErrorObservation(f'File could not be decoded as utf-8: {filepath}.')
         except IsADirectoryError:
-            return ErrorObservation(
-                f'Path is a directory: {filepath}. You can only read files'
-            )
+            return FileReadObservation(path=filepath, content=list_directory(Path(filepath)))
 
         code_view = ''.join(lines)
         return FileReadObservation(path=filepath, content=code_view)
@@ -697,62 +702,66 @@ if __name__ == '__main__':
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         global client, mcp_proxy_manager
-        logger.info('Initializing ActionExecutor...')
-        client = ActionExecutor(
-            plugins_to_load,
-            work_dir=args.working_dir,
-            username=args.username,
-            user_id=args.user_id,
-            enable_browser=args.enable_browser,
-            browsergym_eval_env=args.browsergym_eval_env,
-        )
-        await client.ainit()
-        logger.info('ActionExecutor initialized.')
-
-        # Check if we're on Windows
-        is_windows = sys.platform == 'win32'
-
-        # Initialize and mount MCP Proxy Manager (skip on Windows)
-        if is_windows:
-            logger.info('Skipping MCP Proxy initialization on Windows')
-            mcp_proxy_manager = None
-        else:
-            logger.info('Initializing MCP Proxy Manager...')
-            # Create a MCP Proxy Manager
-            mcp_proxy_manager = MCPProxyManager(
-                auth_enabled=bool(SESSION_API_KEY),
-                api_key=SESSION_API_KEY,
-                logger_level=logger.getEffectiveLevel(),
+        try:
+            logger.info('Initializing ActionExecutor...')
+            client = ActionExecutor(
+                plugins_to_load,
+                work_dir=args.working_dir,
+                username=args.username,
+                user_id=args.user_id,
+                enable_browser=args.enable_browser,
+                browsergym_eval_env=args.browsergym_eval_env,
             )
-            mcp_proxy_manager.initialize()
-            # Mount the proxy to the app
-            allowed_origins = ['*']
-            try:
-                await mcp_proxy_manager.mount_to_app(app, allowed_origins)
-            except Exception as e:
-                logger.error(f'Error mounting MCP Proxy: {e}', exc_info=True)
-                raise RuntimeError(f'Cannot mount MCP Proxy: {e}')
+            await client.ainit()
+            logger.info('ActionExecutor initialized.')
 
-        yield
+            # Check if we're on Windows
+            is_windows = sys.platform == 'win32'
 
-        # Clean up & release the resources
-        logger.info('Shutting down MCP Proxy Manager...')
-        if mcp_proxy_manager:
-            del mcp_proxy_manager
-            mcp_proxy_manager = None
-        else:
-            logger.info('MCP Proxy Manager instance not found for shutdown.')
+            # Initialize and mount MCP Proxy Manager (skip on Windows)
+            if is_windows:
+                logger.info('Skipping MCP Proxy initialization on Windows')
+                mcp_proxy_manager = None
+            else:
+                logger.info('Initializing MCP Proxy Manager...')
+                # Create a MCP Proxy Manager
+                mcp_proxy_manager = MCPProxyManager(
+                    auth_enabled=bool(SESSION_API_KEY),
+                    api_key=SESSION_API_KEY,
+                    logger_level=logger.getEffectiveLevel(),
+                )
+                mcp_proxy_manager.initialize()
+                # Mount the proxy to the app
+                allowed_origins = ['*']
+                try:
+                    await mcp_proxy_manager.mount_to_app(app, allowed_origins)
+                except Exception as e:
+                    logger.error(f'Error mounting MCP Proxy: {e}', exc_info=True)
+                    raise RuntimeError(f'Cannot mount MCP Proxy: {e}')
 
-        logger.info('Closing ActionExecutor...')
-        if client:
-            try:
-                client.close()
-                logger.info('ActionExecutor closed successfully.')
-            except Exception as e:
-                logger.error(f'Error closing ActionExecutor: {e}', exc_info=True)
-        else:
-            logger.info('ActionExecutor instance not found for closing.')
-        logger.info('Shutdown complete.')
+            yield
+        finally:
+            # Clean up & release the resources
+            logger.info('Shutting down MCP Proxy Manager...')
+            if mcp_proxy_manager:
+                del mcp_proxy_manager
+                mcp_proxy_manager = None
+            else:
+                logger.info('MCP Proxy Manager instance not found for shutdown.')
+
+            logger.info('Closing ActionExecutor...')
+            if client:
+                try:
+                    jupyter = client.plugins.get('jupyter')
+                    if isinstance(jupyter, JupyterPlugin):
+                        await jupyter._cleanup_gateway_process()
+                    client.close()
+                    logger.info('ActionExecutor closed successfully.')
+                except Exception as e:
+                    logger.error(f'Error closing ActionExecutor: {e}', exc_info=True)
+            else:
+                logger.info('ActionExecutor instance not found for closing.')
+            logger.info('Shutdown complete.')
 
     app = FastAPI(lifespan=lifespan)
 
@@ -821,6 +830,20 @@ if __name__ == '__main__':
             client.last_execution_time = time.time()
             observation = await client.run_action(action)
             return event_to_dict(observation)
+        except IsADirectoryError as e:
+            if isinstance(action, FileReadAction):
+                assert client.bash_session is not None
+                filepath = client._resolve_path(action.path, client.bash_session.cwd)
+                observation = FileReadObservation(
+                    path=filepath,
+                    content=list_directory(Path(filepath)),
+                )
+                return event_to_dict(observation)
+            logger.exception(f'Error while running /execute_action: {str(e)}')
+            raise HTTPException(
+                status_code=500,
+                detail=f'Internal server error: {str(e)}',
+            )
         except Exception as e:
             logger.exception(f'Error while running /execute_action: {str(e)}')
             raise HTTPException(

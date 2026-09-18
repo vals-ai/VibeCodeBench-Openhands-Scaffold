@@ -1,11 +1,10 @@
 import asyncio
 import json
-import os
 import signal
 import sys
 import threading
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 import openhands.agenthub  # noqa F401 (we import this to get the agents registered)
 import openhands.cli.suppress_warnings  # noqa: F401
@@ -49,6 +48,13 @@ class FakeUserResponseFunc(Protocol):
         encapsulate_solution: bool = False,
         try_parse: Callable[[Action | None], str] | None = None,
     ) -> str: ...
+
+
+def _write_trajectory(file_path: Path, trajectory: list[dict[str, Any]]) -> None:
+    temporary_path = file_path.with_suffix(file_path.suffix + '.tmp')
+    with temporary_path.open('w') as file:
+        json.dump(trajectory, file, indent=4)
+    temporary_path.replace(file_path)
 
 
 async def run_controller(
@@ -220,11 +226,10 @@ async def run_controller(
     def save_trajectory():
         if config.save_trajectory_path is not None:
             # if save_trajectory_path is a folder, use session id as file name
-            if os.path.isdir(config.save_trajectory_path):
-                file_path = os.path.join(config.save_trajectory_path, sid + '.json')
-            else:
-                file_path = config.save_trajectory_path
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            file_path = Path(config.save_trajectory_path)
+            if file_path.is_dir():
+                file_path /= sid + '.json'
+            file_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Use thread lock to prevent concurrent writes
             with trajectory_lock:
@@ -233,8 +238,7 @@ async def run_controller(
                     config.save_screenshots_in_trajectory
                 )
 
-                with open(file_path, 'w') as f:
-                    json.dump(histories, f, indent=4)
+                _write_trajectory(file_path, histories)
 
     def on_event(event: Event) -> None:
         if event.source == EventSource.AGENT:

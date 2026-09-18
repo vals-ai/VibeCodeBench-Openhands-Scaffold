@@ -68,6 +68,28 @@ def read_lines(all_lines: list[str], start: int = 0, end: int = -1) -> list[str]
         return all_lines[begin:end]
 
 
+def list_directory(path: Path) -> str:
+    lines: list[str] = []
+    for root, dirs, files in os.walk(path):
+        relative_root = Path(root).relative_to(path)
+        depth = len(relative_root.parts)
+        if depth >= 2:
+            dirs[:] = []
+
+        dirs[:] = sorted(name for name in dirs if not name.startswith('.'))
+        files = sorted(name for name in files if not name.startswith('.'))
+
+        for name in dirs:
+            relative_path = Path(root, name).relative_to(path).as_posix()
+            lines.append(f'{relative_path}/')
+
+        for name in files:
+            relative_path = Path(root, name).relative_to(path).as_posix()
+            lines.append(relative_path)
+
+    return '\n'.join(lines) if lines else '(empty directory)'
+
+
 async def read_file(
     path: str,
     workdir: str,
@@ -93,7 +115,7 @@ async def read_file(
     except UnicodeDecodeError:
         return ErrorObservation(f'File could not be decoded as utf-8: {path}')
     except IsADirectoryError:
-        return ErrorObservation(f'Path is a directory: {path}. You can only read files')
+        return FileReadObservation(path=path, content=list_directory(whole_path))
     code_view = ''.join(lines)
     return FileReadObservation(path=path, content=code_view)
 

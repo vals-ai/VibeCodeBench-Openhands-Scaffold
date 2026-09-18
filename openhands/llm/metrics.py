@@ -1,7 +1,8 @@
 import copy
 import time
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, computed_field
 
 
 class Cost(BaseModel):
@@ -18,17 +19,52 @@ class ResponseLatency(BaseModel):
     response_id: str
 
 
+class _UsageAccountingBase(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    known_reasoning_tokens: NonNegativeInt
+    missing_reasoning_responses: NonNegativeInt
+    missing_cost_responses: NonNegativeInt
+
+
+class UsageAccounting(_UsageAccountingBase):
+    schema_version: Literal[1]
+
+
+class UsageAccountingV2(_UsageAccountingBase):
+    schema_version: Literal[2]
+    response_count: NonNegativeInt
+
+
+UsageAccountingVersion = Annotated[
+    UsageAccounting | UsageAccountingV2,
+    Field(discriminator='schema_version'),
+]
+
+
 class TokenUsage(BaseModel):
     """Metric tracking detailed token usage per completion call."""
 
     model: str = Field(default='')
     prompt_tokens: int = Field(default=0)
     completion_tokens: int = Field(default=0)
+    reasoning_tokens: int | None = Field(default=None)
     cache_read_tokens: int = Field(default=0)
     cache_write_tokens: int = Field(default=0)
     context_window: int = Field(default=0)
     per_turn_token: int = Field(default=0)
     response_id: str = Field(default='')
+
+    def __setstate__(self, state: dict[Any, Any]) -> None:
+        super().__setstate__(state)
+        self.__dict__.setdefault('reasoning_tokens', None)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total_output_tokens(self) -> int | None:
+        if self.reasoning_tokens is None:
+            return None
+        return self.completion_tokens + self.reasoning_tokens
 
     def __add__(self, other: 'TokenUsage') -> 'TokenUsage':
         """Add two TokenUsage instances together."""
@@ -36,12 +72,42 @@ class TokenUsage(BaseModel):
             model=self.model,
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
             completion_tokens=self.completion_tokens + other.completion_tokens,
+            reasoning_tokens=(
+                self.reasoning_tokens + other.reasoning_tokens
+                if self.reasoning_tokens is not None
+                and other.reasoning_tokens is not None
+                else None
+            ),
             cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
             cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
             context_window=max(self.context_window, other.context_window),
             per_turn_token=other.per_turn_token,
             response_id=self.response_id,
         )
+
+
+def _sum_reasoning_tokens(token_usages: list[TokenUsage]) -> int | None:
+    if not token_usages:
+        return None
+
+    total = 0
+    for usage in token_usages:
+        if usage.reasoning_tokens is None:
+            return None
+        total += usage.reasoning_tokens
+    return total
+
+
+def _has_token_usage(usage: TokenUsage) -> bool:
+    return any(
+        (
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.reasoning_tokens is not None,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        )
+    )
 
 
 class Metrics:
@@ -55,6 +121,13 @@ class Metrics:
 
     def __init__(self, model_name: str = 'default') -> None:
         self._accumulated_cost: float = 0.0
+        self._usage_accounting: UsageAccountingVersion | None = UsageAccountingV2(
+            schema_version=2,
+            response_count=0,
+            known_reasoning_tokens=0,
+            missing_reasoning_responses=0,
+            missing_cost_responses=0,
+        )
         self._max_budget_per_task: float | None = None
         self._costs: list[Cost] = []
         self._response_latencies: list[ResponseLatency] = []
@@ -69,6 +142,10 @@ class Metrics:
             context_window=0,
             response_id='',
         )
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self.__dict__.setdefault('_usage_accounting', None)
 
     @property
     def accumulated_cost(self) -> float:
@@ -127,7 +204,11 @@ class Metrics:
             )
         return self._accumulated_token_usage
 
-    def add_cost(self, value: float) -> None:
+    def add_cost(self, value: float | None) -> None:
+        if value is None:
+            if self._usage_accounting is not None:
+                self._usage_accounting.missing_cost_responses += 1
+            return
         if value < 0:
             raise ValueError('Added cost cannot be negative.')
         self._accumulated_cost += value
@@ -148,15 +229,21 @@ class Metrics:
         cache_write_tokens: int,
         context_window: int,
         response_id: str,
+        *,
+        reasoning_tokens: int | None,
     ) -> None:
         """Add a single usage record."""
         # Token each turn for calculating context usage.
         per_turn_token = prompt_tokens + completion_tokens
 
+        has_usage = bool(self.token_usages) or _has_token_usage(
+            self.accumulated_token_usage
+        )
         usage = TokenUsage(
             model=self.model_name,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            reasoning_tokens=reasoning_tokens,
             cache_read_tokens=cache_read_tokens,
             cache_write_tokens=cache_write_tokens,
             context_window=context_window,
@@ -164,22 +251,53 @@ class Metrics:
             response_id=response_id,
         )
         self._token_usages.append(usage)
-
-        # Update accumulated token usage using the __add__ operator
-        self._accumulated_token_usage = self.accumulated_token_usage + TokenUsage(
-            model=self.model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cache_read_tokens=cache_read_tokens,
-            cache_write_tokens=cache_write_tokens,
-            context_window=context_window,
-            per_turn_token=per_turn_token,
-            response_id='',
-        )
+        if self._usage_accounting is not None:
+            if isinstance(self._usage_accounting, UsageAccountingV2):
+                self._usage_accounting.response_count += 1
+            if reasoning_tokens is None:
+                self._usage_accounting.missing_reasoning_responses += 1
+            else:
+                self._usage_accounting.known_reasoning_tokens += reasoning_tokens
+        self._accumulated_token_usage = self.accumulated_token_usage + usage
+        if not has_usage:
+            self._accumulated_token_usage.reasoning_tokens = usage.reasoning_tokens
 
     def merge(self, other: 'Metrics') -> None:
         """Merge 'other' metrics into this one."""
         self._accumulated_cost += other.accumulated_cost
+        if self._usage_accounting is None or other._usage_accounting is None:
+            self._usage_accounting = None
+        else:
+            accounting = {
+                'known_reasoning_tokens': (
+                    self._usage_accounting.known_reasoning_tokens
+                    + other._usage_accounting.known_reasoning_tokens
+                ),
+                'missing_reasoning_responses': (
+                    self._usage_accounting.missing_reasoning_responses
+                    + other._usage_accounting.missing_reasoning_responses
+                ),
+                'missing_cost_responses': (
+                    self._usage_accounting.missing_cost_responses
+                    + other._usage_accounting.missing_cost_responses
+                ),
+            }
+            if isinstance(
+                self._usage_accounting, UsageAccountingV2
+            ) and isinstance(other._usage_accounting, UsageAccountingV2):
+                self._usage_accounting = UsageAccountingV2(
+                    schema_version=2,
+                    response_count=(
+                        self._usage_accounting.response_count
+                        + other._usage_accounting.response_count
+                    ),
+                    **accounting,
+                )
+            else:
+                self._usage_accounting = UsageAccounting(
+                    schema_version=1,
+                    **accounting,
+                )
 
         # Keep the max_budget_per_task from other if it's set and this one isn't
         if self._max_budget_per_task is None and other.max_budget_per_task is not None:
@@ -187,17 +305,26 @@ class Metrics:
 
         self._costs += other._costs
         # use the property so older picked objects that lack the field won't crash
+        has_usage = bool(self.token_usages) or _has_token_usage(
+            self.accumulated_token_usage
+        )
+        other_has_usage = bool(other.token_usages) or _has_token_usage(
+            other.accumulated_token_usage
+        )
+        current_usage = self.accumulated_token_usage
+        other_usage = other.accumulated_token_usage
+
         self.token_usages += other.token_usages
         self.response_latencies += other.response_latencies
-
-        # Merge accumulated token usage using the __add__ operator
-        self._accumulated_token_usage = (
-            self.accumulated_token_usage + other.accumulated_token_usage
-        )
+        self._accumulated_token_usage = current_usage + other_usage
+        if not has_usage:
+            self._accumulated_token_usage.reasoning_tokens = other_usage.reasoning_tokens
+        elif not other_has_usage:
+            self._accumulated_token_usage.reasoning_tokens = current_usage.reasoning_tokens
 
     def get(self) -> dict:
         """Return the metrics in a dictionary."""
-        return {
+        metrics = {
             'accumulated_cost': self._accumulated_cost,
             'max_budget_per_task': self._max_budget_per_task,
             'accumulated_token_usage': self.accumulated_token_usage.model_dump(),
@@ -207,6 +334,9 @@ class Metrics:
             ],
             'token_usages': [usage.model_dump() for usage in self._token_usages],
         }
+        if self._usage_accounting is not None:
+            metrics['usage_accounting'] = self._usage_accounting.model_dump(mode='json')
+        return metrics
 
     def log(self) -> str:
         """Log the metrics."""
@@ -235,6 +365,39 @@ class Metrics:
 
         # Calculate cost difference
         result._accumulated_cost = self._accumulated_cost - baseline._accumulated_cost
+        if self._usage_accounting is None or baseline._usage_accounting is None:
+            result._usage_accounting = None
+        else:
+            accounting = {
+                'known_reasoning_tokens': (
+                    self._usage_accounting.known_reasoning_tokens
+                    - baseline._usage_accounting.known_reasoning_tokens
+                ),
+                'missing_reasoning_responses': (
+                    self._usage_accounting.missing_reasoning_responses
+                    - baseline._usage_accounting.missing_reasoning_responses
+                ),
+                'missing_cost_responses': (
+                    self._usage_accounting.missing_cost_responses
+                    - baseline._usage_accounting.missing_cost_responses
+                ),
+            }
+            if isinstance(
+                self._usage_accounting, UsageAccountingV2
+            ) and isinstance(baseline._usage_accounting, UsageAccountingV2):
+                result._usage_accounting = UsageAccountingV2(
+                    schema_version=2,
+                    response_count=(
+                        self._usage_accounting.response_count
+                        - baseline._usage_accounting.response_count
+                    ),
+                    **accounting,
+                )
+            else:
+                result._usage_accounting = UsageAccounting(
+                    schema_version=1,
+                    **accounting,
+                )
 
         # Include only costs that were added after the baseline
         if baseline._costs:
@@ -262,6 +425,7 @@ class Metrics:
             prompt_tokens=current_usage.prompt_tokens - base_usage.prompt_tokens,
             completion_tokens=current_usage.completion_tokens
             - base_usage.completion_tokens,
+            reasoning_tokens=_sum_reasoning_tokens(result._token_usages),
             cache_read_tokens=current_usage.cache_read_tokens
             - base_usage.cache_read_tokens,
             cache_write_tokens=current_usage.cache_write_tokens

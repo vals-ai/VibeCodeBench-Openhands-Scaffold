@@ -30,7 +30,6 @@ from model_library.base import (
     TextInput,
     ToolResult,
 )
-from model_library.exceptions import MaxContextWindowExceededError
 
 from openhands.controller.agent import Agent
 from openhands.controller.replay import ReplayManager
@@ -41,6 +40,7 @@ from openhands.core.config import AgentConfig, LLMConfig
 from openhands.core.exceptions import (
     FunctionCallNotExistsError,
     FunctionCallValidationError,
+    LLMContextWindowExceedError,
     LLMMalformedActionError,
     LLMResponseError,
 )
@@ -187,6 +187,11 @@ class AgentController:
         )
 
         self.state = self.state_tracker.state  # TODO: share between manager and controller for backward compatability; we should ideally move all state related logic to the state manager
+
+        # Attachments (e.g. browser screenshots) held back until every tool
+        # call from the current assistant turn has produced its result, so
+        # tool results stay contiguous after their assistant message.
+        self._deferred_attachments: list[InputItem] = []
 
         self.agent_to_llm_config = agent_to_llm_config if agent_to_llm_config else {}
         self.agent_configs = agent_configs if agent_configs else {}
@@ -395,7 +400,7 @@ class AgentController:
                 or isinstance(e, AuthenticationError)
                 or isinstance(e, RateLimitError)
                 or isinstance(e, ContentPolicyViolationError)
-                or isinstance(e, MaxContextWindowExceededError)
+                or isinstance(e, LLMContextWindowExceedError)
             ):
                 reported = e
             else:
@@ -432,6 +437,12 @@ class AgentController:
                 return True
             return False
         if isinstance(event, Observation):
+            if (
+                isinstance(event, ErrorObservation)
+                and event.tool_call is not None
+                and self.state.pending_tool_calls
+            ):
+                return False
             if (
                 isinstance(event, NullObservation)
                 and event.cause is not None
@@ -524,11 +535,24 @@ class AgentController:
             return
 
         elif isinstance(action, AgentFinishAction):
+            self._complete_terminal_tool_call(action)
             self.state.outputs = action.outputs
             await self.set_agent_state_to(AgentState.FINISHED)
         elif isinstance(action, AgentRejectAction):
+            self._complete_terminal_tool_call(action)
             self.state.outputs = action.outputs
             await self.set_agent_state_to(AgentState.REJECTED)
+
+    def _complete_terminal_tool_call(
+        self, action: AgentFinishAction | AgentRejectAction
+    ) -> None:
+        metadata = action.tool_call_metadata
+        if metadata is None:
+            return
+        tool_call = self.state.pending_tool_calls.pop(metadata.tool_call_id)
+        self.state.agent_history.append(
+            ToolResult(tool_call=tool_call, result='Agent turn completed.')
+        )
 
     async def _handle_observation(self, observation: Observation) -> None:
         """Handles observation from the event stream.
@@ -839,6 +863,27 @@ class AgentController:
         # unset delegate so parent can resume normal handling
         self.delegate = None
 
+    def _emit_error_observation(self, error: Exception) -> None:
+        observation = ErrorObservation(
+            content=str(error),
+            tool_call=getattr(error, 'tool_call', None),
+        )
+        if (
+            isinstance(error, (FunctionCallValidationError, FunctionCallNotExistsError))
+            and error.model_response is not None
+        ):
+            observation.model_response = error.model_response
+            raw = getattr(error.model_response, 'raw', None)
+            response_id = raw.get('id') if raw else None
+            if response_id is None:
+                response_id = getattr(error.model_response.extras, 'response_id', None)
+            if response_id is not None:
+                assert isinstance(response_id, str)
+                observation.response_id = response_id
+            self._prepare_metrics_for_frontend(observation)
+
+        self.event_stream.add_event(observation, EventSource.AGENT)
+
     async def _step(self) -> None:
         """Executes a single step of the parent or delegate agent. Detects stuck agents and limits on the number of iterations and the task budget."""
         if self.get_agent_state() != AgentState.RUNNING:
@@ -898,18 +943,9 @@ class AgentController:
                 FunctionCallNotExistsError,
                 RateLimitError,
             ) as e:
-                tool_call = getattr(e, 'tool_call', None)
-                error_observation = ErrorObservation(
-                    content=str(e),
-                    tool_call=tool_call,
-                )
-
-                self.event_stream.add_event(
-                    error_observation,
-                    EventSource.AGENT,
-                )
+                self._emit_error_observation(e)
                 return
-            except MaxContextWindowExceededError as e:
+            except LLMContextWindowExceedError as e:
                 if self.agent.config.enable_history_truncation:
                     self.event_stream.add_event(
                         CondensationRequestAction(), EventSource.AGENT
@@ -917,6 +953,11 @@ class AgentController:
                     return
                 else:
                     raise e from e
+
+            errors = self.agent.pending_tool_call_errors
+            self.agent.pending_tool_call_errors = []
+            for error in errors:
+                self._emit_error_observation(error)
 
         if action.runnable:
             if self.state.confirmation_mode and (
@@ -1152,9 +1193,16 @@ class AgentController:
 
             input_items.append(tool_result)
 
-            self._add_images_if_available(observation, input_items)
-
             del self.state.pending_tool_calls[tool_call_id]
+
+            attachments: list[InputItem] = []
+            self._add_images_if_available(observation, attachments)
+            if self.state.pending_tool_calls:
+                self._deferred_attachments.extend(attachments)
+            else:
+                input_items.extend(self._deferred_attachments)
+                self._deferred_attachments = []
+                input_items.extend(attachments)
         elif tool_call_id is not None:
             self.log(
                 'warning',
@@ -1166,9 +1214,7 @@ class AgentController:
             formatted_result = _format_observation_content(observation)
             if formatted_result.strip():
                 # Prefix to indicate this came from a user-initiated command/output
-                prefixed = (
-                    f'\nObserved result of command executed by user:\n{formatted_result}'
-                )
+                prefixed = f'\nObserved result of command executed by user:\n{formatted_result}'
                 input_items.append(TextInput(text=prefixed))
                 # Attach images for non-tool-call observations if available
                 self._add_images_if_available(observation, input_items)
@@ -1204,7 +1250,7 @@ class AgentController:
 
         return self._stuck_detector.is_stuck(self.headless_mode)
 
-    def _prepare_metrics_for_frontend(self, action: Action) -> None:
+    def _prepare_metrics_for_frontend(self, event: Event) -> None:
         """Create a minimal metrics object for frontend display and log it.
 
         To avoid performance issues with long conversations, we only keep:
@@ -1215,7 +1261,7 @@ class AgentController:
         This includes metrics from both the agent's LLM and the condenser's LLM if it exists.
 
         Args:
-            action: The action to attach metrics to
+            event: The event to attach metrics to
         """
         # Get metrics from agent LLM
         metrics = self.conversation_stats.get_combined_metrics()
@@ -1223,6 +1269,7 @@ class AgentController:
         # Create a clean copy with only the fields we want to keep
         clean_metrics = Metrics()
         clean_metrics.accumulated_cost = metrics.accumulated_cost
+        clean_metrics._usage_accounting = copy.deepcopy(metrics._usage_accounting)
         clean_metrics._accumulated_token_usage = copy.deepcopy(
             metrics.accumulated_token_usage
         )
@@ -1231,7 +1278,7 @@ class AgentController:
         if self.state.budget_flag:
             clean_metrics.max_budget_per_task = self.state.budget_flag.max_value
 
-        action.llm_metrics = clean_metrics
+        event.llm_metrics = clean_metrics
 
         # Log the metrics information for debugging
         # Get the latest usage directly from the agent's metrics

@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from collections import deque
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -9,7 +10,14 @@ from litellm import (
     ContentPolicyViolationError,
     ContextWindowExceededError,
 )
+from model_library.base import (
+    QueryResult,
+    QueryResultExtras,
+    QueryResultMetadata,
+    ToolCall,
+)
 
+from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
 from openhands.controller.agent import Agent
 from openhands.controller.agent_controller import AgentController
 from openhands.controller.state.control_flags import (
@@ -22,8 +30,18 @@ from openhands.core.config.llm_config import LLMConfig
 from openhands.core.main import run_controller
 from openhands.core.schema import AgentState
 from openhands.events import Event, EventSource, EventStream, EventStreamSubscriber
-from openhands.events.action import ChangeAgentStateAction, CmdRunAction, MessageAction
-from openhands.events.action.agent import CondensationAction, RecallAction
+from openhands.events.action import (
+    AgentDelegateAction,
+    AgentFinishAction,
+    ChangeAgentStateAction,
+    CmdRunAction,
+    MessageAction,
+)
+from openhands.events.action.agent import (
+    CondensationAction,
+    CondensationRequestAction,
+    RecallAction,
+)
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import RecallType
 from openhands.events.observation import (
@@ -101,6 +119,7 @@ def mock_agent_with_stats():
     agent.sandbox_plugins = []
     agent.config = agent_config
     agent.prompt_manager = MagicMock()
+    agent.pending_tool_call_errors = []
 
     # Add a proper system message mock
     system_message = SystemMessageAction(
@@ -224,6 +243,128 @@ async def test_on_event_change_agent_state_action(
     change_state_action = ChangeAgentStateAction(agent_state=AgentState.PAUSED)
     await send_event_to_controller(controller, change_state_action)
     assert controller.get_agent_state() == AgentState.PAUSED
+    await controller.close()
+
+
+@pytest.mark.parametrize('arguments', ['null', '1'])
+@pytest.mark.parametrize(
+    ('valid_name', 'valid_args', 'action_type'),
+    [
+        ('finish', '{}', AgentFinishAction),
+        ('delegate_to_browsing_agent', '{"task": "inspect"}', AgentDelegateAction),
+        ('request_condensation', '{}', CondensationRequestAction),
+    ],
+)
+@pytest.mark.asyncio
+async def test_action_conversion_error_preserves_response_and_metrics(
+    arguments,
+    valid_name,
+    valid_args,
+    action_type,
+    mock_event_stream,
+):
+    response = QueryResult(
+        metadata=QueryResultMetadata(
+            in_tokens=10,
+            out_tokens=4,
+            reasoning_tokens=3,
+            cache_read_tokens=20,
+            cache_write_tokens=2,
+        ),
+        tool_calls=[
+            ToolCall(id='valid', name=valid_name, args=valid_args),
+            ToolCall(id='invalid', name='execute_bash', args=arguments),
+        ],
+        raw={'model': 'test-model'},
+        extras=QueryResultExtras(response_id='provider-response-id'),
+    )
+    metrics = Metrics(model_name='test-model')
+    metrics.add_cost(0.25)
+    metrics.add_token_usage(
+        10,
+        4,
+        20,
+        2,
+        0,
+        'provider-response-id',
+        reasoning_tokens=3,
+    )
+    conversation_stats = ConversationStats(
+        file_store=None,
+        conversation_id='test-conversation',
+        user_id=None,
+    )
+    conversation_stats.service_to_metrics['agent'] = metrics
+    codeact_agent = object.__new__(CodeActAgent)
+    codeact_agent.pending_actions = deque()
+    codeact_agent.pending_tool_call_errors = []
+    codeact_agent.llm = MagicMock()
+    codeact_agent.history = []
+    codeact_agent.mcp_tools = {}
+    codeact_agent._query = MagicMock(return_value=response)
+    mock_agent = MagicMock(spec=Agent)
+    mock_agent.get_system_message.return_value = None
+    mock_agent.pending_tool_call_errors = []
+
+    def step(state):
+        action = codeact_agent.step(state)
+        mock_agent.pending_tool_call_errors = codeact_agent.pending_tool_call_errors
+        return action
+
+    mock_agent.step.side_effect = step
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        conversation_stats=conversation_stats,
+        iteration_delta=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+        initial_state=State(metrics=metrics),
+    )
+    controller.state.agent_state = AgentState.RUNNING
+    controller.state.iteration_flag.current_value = (
+        controller.state.iteration_flag.max_value - 1
+    )
+    mock_event_stream.add_event.reset_mock()
+
+    await controller._step()
+
+    assert controller.state.iteration_flag.current_value == (
+        controller.state.iteration_flag.max_value
+    )
+    assert codeact_agent._query.call_count == 1
+    [error_call, action_call] = mock_event_stream.add_event.call_args_list
+    error_observation, source = error_call.args
+    assert isinstance(error_observation, ErrorObservation)
+    assert source == EventSource.AGENT
+    assert error_observation.content == 'Tool call arguments must be a JSON object'
+    assert error_observation.tool_call == response.tool_calls[1]
+    assert error_observation.model_response == response
+    assert error_observation.response_id == 'provider-response-id'
+    assert error_observation.llm_metrics is not None
+    assert error_observation.llm_metrics.accumulated_cost == 0.25
+    usage = error_observation.llm_metrics.accumulated_token_usage
+    assert usage.prompt_tokens == 10
+    assert usage.completion_tokens == 4
+    assert usage.reasoning_tokens == 3
+    assert usage.cache_read_tokens == 20
+    assert usage.cache_write_tokens == 2
+
+    serialized = event_to_dict(error_observation)
+    assert serialized['response_id'] == 'provider-response-id'
+    assert serialized['model_response']['metadata']['reasoning_tokens'] == 3
+    assert serialized['llm_metrics']['accumulated_cost'] == 0.25
+    assert serialized['llm_metrics']['usage_accounting']['response_count'] == 1
+
+    valid_action, source = action_call.args
+    assert isinstance(valid_action, action_type)
+    assert source == EventSource.AGENT
+    del controller.state.pending_tool_calls['invalid']
+    assert not controller.should_step(error_observation)
+    controller.state.pending_tool_calls.clear()
+    assert controller.should_step(error_observation)
+
     await controller.close()
 
 
@@ -1462,6 +1603,7 @@ async def test_action_metrics_copy(mock_agent_with_stats):
     # Add a cost instance - should not be included in action metrics
     # This will increase accumulated_cost by 0.02
     metrics.add_cost(0.02)
+    metrics.add_cost(None)
 
     # Add a response latency - should not be included in action metrics
     metrics.add_response_latency(0.5, 'test-id-2')
@@ -1538,6 +1680,8 @@ async def test_action_metrics_copy(mock_agent_with_stats):
     # Verify it's a deep copy by modifying the original
     mock_agent.llm.metrics.accumulated_cost = 0.1
     assert last_action.llm_metrics.accumulated_cost == 0.07
+    assert last_action.llm_metrics._usage_accounting == metrics._usage_accounting
+    assert last_action.llm_metrics._usage_accounting is not metrics._usage_accounting
 
     await controller.close()
 

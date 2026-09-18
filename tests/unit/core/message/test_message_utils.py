@@ -21,6 +21,7 @@ def test_get_token_usage_for_event():
     metrics.add_token_usage(
         prompt_tokens=usage_record.prompt_tokens,
         completion_tokens=usage_record.completion_tokens,
+        reasoning_tokens=None,
         cache_read_tokens=usage_record.cache_read_tokens,
         cache_write_tokens=usage_record.cache_write_tokens,
         context_window=1000,
@@ -133,6 +134,7 @@ def test_get_token_usage_for_event_fallback():
     metrics.add_token_usage(
         prompt_tokens=usage_record.prompt_tokens,
         completion_tokens=usage_record.completion_tokens,
+        reasoning_tokens=None,
         cache_read_tokens=usage_record.cache_read_tokens,
         cache_write_tokens=usage_record.cache_write_tokens,
         context_window=1000,

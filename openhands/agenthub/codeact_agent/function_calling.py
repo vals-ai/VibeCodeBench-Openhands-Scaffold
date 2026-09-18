@@ -93,6 +93,11 @@ def response_to_actions(
             try:
                 if isinstance(tool_call.args, str):
                     arguments = json.loads(tool_call.args)
+                    if not isinstance(arguments, dict):
+                        raise FunctionCallValidationError(
+                            'Tool call arguments must be a JSON object',
+                            tool_call=tool_call,
+                        )
                 else:
                     arguments = tool_call.args
             except json.decoder.JSONDecodeError as e:
@@ -524,20 +529,28 @@ def response_to_actions(
             )
             actions.append(action)
     else:
-        actions.append(
-            MessageAction(
-                content=str(response.output_text) if response.output_text else '',
-                wait_for_response=True,
-            )
+        content = response.output_text or response.reasoning or ''
+        action = MessageAction(
+            content=str(content),
+            wait_for_response=True,
         )
+        action.model_response = response
+        actions.append(action)
 
     # Add response id to actions
     # This will ensure we can match both actions without tool calls (e.g. MessageAction)
     # and actions with tool calls (e.g. CmdRunAction, IPythonRunCellAction, etc.)
     # with the token usage data
     for action in actions:
-        response_id = response.raw.get('id') if response.raw else None
-        action.response_id = response_id
+        # Prefer response.raw['id'], then QueryResult.extras.response_id,
+        # else None. getattr is safe while either attribute is absent.
+        raw = getattr(response, 'raw', None)
+        response_id = raw.get('id') if raw else None
+        if response_id is None:
+            response_id = getattr(getattr(response, 'extras', None), 'response_id', None)
+        if response_id is not None:
+            assert isinstance(response_id, str)
+            action.response_id = response_id
 
     assert len(actions) >= 1
     return actions

@@ -2,7 +2,7 @@
 # Agent Exceptions
 # ============================================
 
-from model_library.base import ToolCall
+from model_library.base import QueryResult, ToolCall
 
 
 class AgentError(Exception):
@@ -141,6 +141,7 @@ class FunctionCallValidationError(Exception):
     ) -> None:
         super().__init__(message)
         self.tool_call: ToolCall | None = tool_call
+        self.model_response: QueryResult | None = None
 
 
 class FunctionCallNotExistsError(Exception):
@@ -153,6 +154,7 @@ class FunctionCallNotExistsError(Exception):
     ) -> None:
         super().__init__(message)
         self.tool_call: ToolCall | None = tool_call
+        self.model_response: QueryResult | None = None
 
 
 # ============================================

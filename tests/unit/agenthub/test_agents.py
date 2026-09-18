@@ -1,8 +1,10 @@
+from collections import deque
 from typing import Union
 from unittest.mock import Mock
 
 import pytest
 from litellm import ChatCompletionMessageToolCall
+from model_library.base import QueryResult, ToolCall
 
 from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
 from openhands.agenthub.codeact_agent.function_calling import (
@@ -31,11 +33,15 @@ from openhands.agenthub.readonly_agent.tools import (
 from openhands.controller.state.state import State
 from openhands.core.config import AgentConfig, LLMConfig
 from openhands.core.config.openhands_config import OpenHandsConfig
-from openhands.core.exceptions import FunctionCallNotExistsError
+from openhands.core.exceptions import (
+    FunctionCallNotExistsError,
+    FunctionCallValidationError,
+)
 from openhands.core.message import ImageContent, Message, TextContent
 from openhands.events.action import (
     CmdRunAction,
     MessageAction,
+    NullAction,
 )
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import EventSource
@@ -110,6 +116,7 @@ def test_reset(agent):
     action = MessageAction(content='test')
     action._source = EventSource.AGENT
     agent.pending_actions.append(action)
+    agent.pending_tool_call_errors.append(FunctionCallValidationError('test'))
 
     # Create a mock state with initial user message
     mock_state = Mock(spec=State)
@@ -122,6 +129,7 @@ def test_reset(agent):
 
     # Verify state is cleared
     assert len(agent.pending_actions) == 0
+    assert not agent.pending_tool_call_errors
 
 
 def test_step_with_pending_actions(agent):
@@ -140,6 +148,102 @@ def test_step_with_pending_actions(agent):
     result = agent.step(mock_state)
     assert result == pending_action
     assert len(agent.pending_actions) == 0
+
+
+@pytest.mark.parametrize(
+    ('tool_call', 'error_type'),
+    [
+        (
+            ToolCall(id='unknown', name='unknown_tool', args='{}'),
+            FunctionCallNotExistsError,
+        ),
+        (
+            ToolCall(id='malformed', name='execute_bash', args='{}'),
+            FunctionCallValidationError,
+        ),
+    ],
+)
+def test_step_preserves_response_on_action_conversion_error(tool_call, error_type):
+    response = QueryResult(tool_calls=[tool_call])
+    agent = object.__new__(CodeActAgent)
+    agent.pending_actions = deque()
+    agent.pending_tool_call_errors = []
+    agent.llm = Mock()
+    agent.history = []
+    agent.mcp_tools = {}
+    agent._query = Mock(return_value=response)
+    state = Mock(spec=State)
+    state.inputs = []
+    state.pending_tool_calls = {}
+
+    action = agent.step(state)
+
+    assert isinstance(action, NullAction)
+    [error] = agent.pending_tool_call_errors
+    assert isinstance(error, error_type)
+    assert error.model_response is response
+
+
+def test_step_handles_parallel_tool_calls_individually():
+    invalid = ToolCall(id='invalid', name='str_replace_editor', args='null')
+    valid = ToolCall(id='valid', name='execute_bash', args='{"command": "ls"}')
+    unknown = ToolCall(id='unknown', name='unknown_tool', args='{}')
+    response = QueryResult(
+        output_text='Inspect the workspace.',
+        reasoning='Find the relevant files first.',
+        tool_calls=[invalid, valid, unknown],
+    )
+    agent = object.__new__(CodeActAgent)
+    agent.pending_actions = deque()
+    agent.pending_tool_call_errors = []
+    agent.llm = Mock()
+    agent.history = []
+    agent.mcp_tools = {}
+    agent._query = Mock(return_value=response)
+    state = Mock(spec=State)
+    state.inputs = []
+    state.pending_tool_calls = {}
+
+    action = agent.step(state)
+
+    agent._query.assert_called_once()
+    assert list(state.pending_tool_calls) == ['invalid', 'valid', 'unknown']
+    assert not agent.pending_actions
+    [invalid_error, unknown_error] = agent.pending_tool_call_errors
+    assert invalid_error.tool_call is invalid
+    assert invalid_error.model_response is response
+    assert unknown_error.tool_call is unknown
+    assert unknown_error.model_response is response
+    assert isinstance(action, CmdRunAction)
+    assert action.thought == (
+        'Output: Inspect the workspace.\nReasoning: Find the relevant files first.'
+    )
+    assert action.tool_call_metadata is not None
+    assert action.tool_call_metadata.tool_call_id == 'valid'
+    assert action.tool_call_metadata.model_response is response
+    assert action.tool_call_metadata.total_calls_in_response == 3
+
+
+def test_response_batch_uses_subclass_parser():
+    tool_call = ToolCall(id='valid', name='execute_bash', args='{"command": "ls"}')
+    response = QueryResult(tool_calls=[tool_call])
+    action = CmdRunAction(command='ls')
+    action.tool_call_metadata = ToolCallMetadata(
+        tool_call_id=tool_call.id,
+        function_name=tool_call.name,
+        model_response=response,
+        total_calls_in_response=1,
+    )
+    agent = object.__new__(ReadOnlyAgent)
+    agent.response_to_actions = Mock(return_value=[action])
+
+    actions, errors = agent._response_to_actions_and_errors(response)
+
+    assert actions == [action]
+    assert not errors
+    [single_response] = agent.response_to_actions.call_args.args
+    assert single_response.tool_calls == [tool_call]
+    assert action.tool_call_metadata.model_response is response
 
 
 def test_cmd_run_tool():

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from model_library.base import QueryResult
+
 from openhands.events.tool import ToolCallMetadata
 from openhands.llm.metrics import Metrics
 
@@ -129,3 +131,14 @@ class Event:
     @response_id.setter
     def response_id(self, value: str) -> None:
         self._response_id = value
+
+    # optional field, the model response that produced the event
+    @property
+    def model_response(self) -> QueryResult | None:
+        if hasattr(self, '_model_response'):
+            return self._model_response  # type: ignore[attr-defined]
+        return None
+
+    @model_response.setter
+    def model_response(self, value: QueryResult) -> None:
+        self._model_response = value

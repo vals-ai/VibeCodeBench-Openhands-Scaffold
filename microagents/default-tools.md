@@ -9,7 +9,7 @@ mcp_tools:
   stdio_servers:
     - name: "fetch"
       command: "uvx"
-      args: ["mcp-server-fetch"]
+      args: ["--with", "mcp<2", "mcp-server-fetch"]
 # We leave the body empty because MCP tools will automatically add the
 # tool description for LLMs in tool calls, so there's no need to add extra descriptions.
 ---

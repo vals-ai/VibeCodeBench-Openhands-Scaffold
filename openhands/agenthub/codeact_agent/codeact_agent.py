@@ -3,7 +3,6 @@ from collections import deque
 from typing import override
 
 from model_library.base import InputItem, QueryResult, ToolDefinition
-from model_library.exceptions import MaxContextWindowExceededError
 
 import openhands.agenthub.codeact_agent.function_calling as codeact_function_calling
 from openhands.agenthub.codeact_agent.tools.bash import create_cmd_run_tool
@@ -24,7 +23,12 @@ from openhands.agenthub.codeact_agent.tools.think import ThinkTool
 from openhands.controller.agent import Agent
 from openhands.controller.state.state import State
 from openhands.core.config import AgentConfig
-from openhands.events.action import Action
+from openhands.core.exceptions import (
+    FunctionCallNotExistsError,
+    FunctionCallValidationError,
+    LLMContextWindowExceedError,
+)
+from openhands.events.action import Action, NullAction
 from openhands.llm.condenser import HistoryWindowCondenser
 from openhands.llm.llm import LLM
 from openhands.llm.llm_registry import LLMRegistry
@@ -34,6 +38,8 @@ from openhands.runtime.plugins import (
     PluginRequirement,
 )
 from openhands.utils.prompt import PromptManager
+
+ToolCallError = FunctionCallValidationError | FunctionCallNotExistsError
 
 
 class CodeActAgent(Agent):
@@ -72,7 +78,7 @@ class CodeActAgent(Agent):
         - config (AgentConfig): The configuration for this agent
         """
         super().__init__(config, llm_registry)
-        self.pending_actions: deque['Action'] = deque()
+        self.pending_actions: deque[Action] = deque()
         self.reset()
         self.tools: list[ToolDefinition] = self._get_tools()
 
@@ -80,7 +86,6 @@ class CodeActAgent(Agent):
 
         # Override with router if needed
         self.llm: LLM = self.llm_registry.get_router(self.config)
-        self.history: list[InputItem] = []
 
     @property
     @override
@@ -139,7 +144,7 @@ class CodeActAgent(Agent):
                 history=history,
                 tools=self.tools,
             )
-        except MaxContextWindowExceededError:
+        except LLMContextWindowExceedError:
             condensed_history = self.condenser.condense_history(history)
             self.llm.pretty_print(
                 f'Condensed history from {len(history)} to {len(condensed_history)} items. Removed {len(history) - len(condensed_history)} items.'
@@ -185,7 +190,7 @@ class CodeActAgent(Agent):
 
         response = self._query(
             state.inputs,
-            self.history,
+            state.agent_history,
         )
 
         response_text = response.output_text or response.reasoning
@@ -198,7 +203,7 @@ class CodeActAgent(Agent):
             for tool_call in response.tool_calls:
                 self.llm.pretty_print(tool_call)
 
-        self.history = response.history
+        state.agent_history = response.history
 
         state.flush()
 
@@ -206,26 +211,53 @@ class CodeActAgent(Agent):
             for tool_call in response.tool_calls:
                 state.pending_tool_calls[tool_call.id] = tool_call
 
-        actions = self.response_to_actions(response)
-
-        actions_with_tool_calls = [
-            action for action in actions if action.tool_call_metadata
-        ]
-
-        assert len(actions_with_tool_calls) == len(response.tool_calls), (
-            'Tool call count does not match action count'
+        actions, self.pending_tool_call_errors = self._response_to_actions_and_errors(
+            response
         )
-
-        if not actions_with_tool_calls:
+        if not response.tool_calls:
             return actions[0]
 
-        for action in actions_with_tool_calls:
-            self.pending_actions.append(action)
+        assert len(actions) + len(self.pending_tool_call_errors) == len(
+            response.tool_calls
+        )
+        self.pending_actions.extend(actions)
+        if self.pending_actions:
+            return self.pending_actions.popleft()
+        return NullAction()
 
-        return self.pending_actions.popleft()
-
-    def response_to_actions(self, response: 'QueryResult') -> list['Action']:
+    def response_to_actions(self, response: QueryResult) -> list[Action]:
         return codeact_function_calling.response_to_actions(
             response,
-            mcp_tool_names=list(self.mcp_tools.keys()),
+            mcp_tool_names=list(self.mcp_tools),
         )
+
+    def _response_to_actions_and_errors(
+        self, response: QueryResult
+    ) -> tuple[list[Action], list[ToolCallError]]:
+        if not response.tool_calls:
+            return self.response_to_actions(response), []
+
+        actions: list[Action] = []
+        errors: list[ToolCallError] = []
+        for tool_call in response.tool_calls:
+            single_response = response.model_copy(
+                update={
+                    'tool_calls': [tool_call],
+                    'output_text': None if actions else response.output_text,
+                    'reasoning': None if actions else response.reasoning,
+                }
+            )
+            try:
+                [action] = self.response_to_actions(single_response)
+            except (FunctionCallValidationError, FunctionCallNotExistsError) as error:
+                error.model_response = response
+                errors.append(error)
+                continue
+
+            metadata = action.tool_call_metadata
+            assert metadata is not None
+            metadata.model_response = response
+            metadata.total_calls_in_response = len(response.tool_calls)
+            actions.append(action)
+
+        return actions, errors
