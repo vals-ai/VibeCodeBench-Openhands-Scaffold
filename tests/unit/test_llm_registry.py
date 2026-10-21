@@ -3,9 +3,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
+from model_library.base import QueryResult, SystemInput, TextInput
+
 from openhands.core.config.llm_config import LLMConfig
 from openhands.core.config.openhands_config import OpenHandsConfig
+from openhands.llm.llm import LLM
 from openhands.llm.llm_registry import LLMRegistry, RegistryEvent
+from openhands.llm.metrics import Metrics
 
 
 class TestLLMRegistry(unittest.TestCase):
@@ -18,6 +22,17 @@ class TestLLMRegistry(unittest.TestCase):
         self.config = OpenHandsConfig(
             llms={'llm': self.llm_config}, default_agent='CodeActAgent'
         )
+
+        def create_llm(service_id, config, retry_listener=None):
+            llm = MagicMock(spec=LLM)
+            llm.service_id = service_id
+            llm.config = config
+            llm.metrics = Metrics(model_name=config.model)
+            return llm
+
+        model_patch = patch('openhands.llm.llm_registry.LLM', create_llm)
+        model_patch.start()
+        self.addCleanup(model_patch.stop)
 
         # Create a registry for testing
         self.registry = LLMRegistry(config=self.config)
@@ -99,14 +114,15 @@ class TestLLMRegistry(unittest.TestCase):
     def test_request_extraneous_completion(self):
         """Test that requesting an extraneous completion creates a new LLM if needed."""
         service_id = 'extraneous-service'
-        messages = [{'role': 'user', 'content': 'Hello, world!'}]
+        messages = [
+            {'role': 'system', 'content': 'Generate a concise title.'},
+            {'role': 'user', 'content': 'Hello, world!'},
+        ]
 
         # Mock the _create_new_llm method to avoid actual LLM initialization
         with patch.object(self.registry, '_create_new_llm') as mock_create:
             mock_llm = MagicMock()
-            mock_response = MagicMock()
-            mock_response.choices = [MagicMock()]
-            mock_response.choices[0].message.content = '  Hello from the LLM!  '
+            mock_response = QueryResult(output_text='  Hello from the LLM!  ')
             mock_llm.completion.return_value = mock_response
             mock_create.return_value = mock_llm
 
@@ -133,7 +149,12 @@ class TestLLMRegistry(unittest.TestCase):
             )
 
             # Verify completion was called with correct messages
-            mock_llm.completion.assert_called_once_with(messages=messages)
+            mock_llm.completion.assert_called_once_with(
+                input=[
+                    SystemInput(text='Generate a concise title.'),
+                    TextInput(text='Hello, world!'),
+                ]
+            )
 
     def test_get_active_llm(self):
         """Test that get_active_llm returns the active agent LLM."""

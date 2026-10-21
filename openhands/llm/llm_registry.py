@@ -2,6 +2,7 @@ import copy
 from typing import Any, Callable
 from uuid import uuid4
 
+from model_library.base import SystemInput, TextInput
 from pydantic import BaseModel, ConfigDict
 
 from openhands.core.config.agent_config import AgentConfig
@@ -65,8 +66,14 @@ class LLMRegistry:
             )
 
         llm = self.service_to_llm[service_id]
-        response = llm.completion(messages=messages)
-        return response.choices[0].message.content.strip()
+        input_types = {'system': SystemInput, 'user': TextInput}
+        inputs = [
+            input_types[message['role']](text=message['content'])
+            for message in messages
+        ]
+        response = llm.completion(input=inputs)
+        assert response.output_text is not None
+        return response.output_text.strip()
 
     def get_llm_from_agent_config(self, service_id: str, agent_config: AgentConfig):
         llm_config = self.config.get_llm_config_from_agent_config(agent_config)

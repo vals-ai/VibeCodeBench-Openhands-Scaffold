@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
 from integrations.solvability.models.difficulty_level import DifficultyLevel
 from integrations.solvability.models.report import SolvabilityReport
 from integrations.solvability.prompts import load_prompt
+from model_library.base import SystemInput, TextInput, ToolBody, ToolDefinition
 from pydantic import BaseModel, Field
 
 from openhands.llm import LLM
@@ -124,27 +124,37 @@ class SolvabilitySummary(BaseModel):
         import time
 
         start_time = time.time()
+        function = SolvabilitySummary.tool_description()['function']
         response = llm.completion(
-            messages=[
-                SolvabilitySummary.system_message(),
-                SolvabilitySummary.user_message(report),
+            input=[
+                SystemInput(text=SolvabilitySummary.system_message()['content']),
+                TextInput(text=SolvabilitySummary.user_message(report)['content']),
             ],
-            tools=[SolvabilitySummary.tool_description()],
+            tools=[
+                ToolDefinition(
+                    name=function['name'],
+                    body=ToolBody(
+                        name=function['name'],
+                        description=function['description'],
+                        properties=function['parameters']['properties'],
+                        required=function['parameters']['required'],
+                    ),
+                )
+            ],
             tool_choice=SolvabilitySummary.tool_choice(),
         )
         response_latency = time.time() - start_time
 
         # Grab the arguments from the forced function call
-        arguments = json.loads(
-            response.choices[0].message.tool_calls[0].function.arguments
-        )
+        arguments = response.tool_calls[0].parsed_args
+        assert arguments is not None
 
         return SolvabilitySummary(
             # The score is copied directly from the report
             score=report.score,
             # Performance and usage metrics are pulled from the response
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
+            prompt_tokens=response.metadata.in_tokens,
+            completion_tokens=response.metadata.out_tokens,
             response_latency=response_latency,
             # Every other field should be taken from the forced function call
             **arguments,

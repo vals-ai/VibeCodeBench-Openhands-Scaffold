@@ -1,8 +1,8 @@
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+from model_library.base import SystemInput, TextInput, ToolBody, ToolDefinition
 from pydantic import BaseModel
 
 from openhands.core.config import LLMConfig
@@ -179,40 +179,6 @@ class Featurizer(BaseModel):
     features: list[Feature]
     """List of features to extract from each issue description."""
 
-    def system_message(self) -> dict[str, Any]:
-        """
-        Construct the system message for LLM conversations.
-
-        Returns:
-            dict[str, Any]: System message dictionary for LLM API calls.
-        """
-        return {
-            'role': 'system',
-            'content': self.system_prompt,
-        }
-
-    def user_message(
-        self, issue_description: str, set_cache: bool = True
-    ) -> dict[str, Any]:
-        """
-        Construct the user message containing the issue description.
-
-        Args:
-            issue_description: The description of the issue to analyze.
-            set_cache: Whether to enable ephemeral caching for this message.
-                      Should be False for single samples to avoid cache overhead.
-
-        Returns:
-            dict[str, Any]: User message dictionary for LLM API calls.
-        """
-        message: dict[str, Any] = {
-            'role': 'user',
-            'content': f'{self.message_prefix}{issue_description}',
-        }
-        if set_cache:
-            message['cache_control'] = {'type': 'ephemeral'}
-        return message
-
     @property
     def tool_choice(self) -> dict[str, Any]:
         """
@@ -282,15 +248,26 @@ class Featurizer(BaseModel):
         # TODO: use llm registry
         llm = LLM(llm_config, service_id='solvability')
 
+        function = self.tool_description['function']
+        tool = ToolDefinition(
+            name=function['name'],
+            body=ToolBody(
+                name=function['name'],
+                description=function['description'],
+                properties=function['parameters']['properties'],
+                required=[],
+            ),
+        )
+
         # Generate multiple samples to account for LLM variability
         for _ in range(samples):
             start_time = time.time()
             response = llm.completion(
-                messages=[
-                    self.system_message(),
-                    self.user_message(issue_description, set_cache=(samples > 1)),
+                input=[
+                    SystemInput(text=self.system_prompt),
+                    TextInput(text=f'{self.message_prefix}{issue_description}'),
                 ],
-                tools=[self.tool_description],
+                tools=[tool],
                 tool_choice=self.tool_choice,
                 temperature=temperature,
             )
@@ -299,13 +276,13 @@ class Featurizer(BaseModel):
             # Extract timing and token usage metrics
             latency = stop_time - start_time
             # Parse the structured tool call response containing feature evaluations
-            features = response.choices[0].message.tool_calls[0].function.arguments  # type: ignore[index, union-attr]
-            embedding = json.loads(features)
+            embedding = response.tool_calls[0].parsed_args
+            assert embedding is not None
 
             # Accumulate results and metrics
             embedding_samples.append(embedding)
-            prompt_tokens += response.usage.prompt_tokens  # type: ignore[union-attr, attr-defined]
-            completion_tokens += response.usage.completion_tokens  # type: ignore[union-attr, attr-defined]
+            prompt_tokens += response.metadata.in_tokens
+            completion_tokens += response.metadata.out_tokens
             response_latency += latency
 
         return FeatureEmbedding(

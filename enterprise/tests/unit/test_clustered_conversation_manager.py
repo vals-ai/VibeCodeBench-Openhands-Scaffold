@@ -16,6 +16,13 @@ from openhands.server.session.conversation_init_data import ConversationInitData
 from openhands.storage.memory import InMemoryFileStore
 
 
+@pytest.fixture
+def mock_llm_registry(monkeypatch):
+    registry = MagicMock()
+    monkeypatch.setattr('openhands.utils.utils.LLMRegistry', registry)
+    return registry
+
+
 @dataclass
 class GetMessageMock:
     message: dict | None
@@ -113,7 +120,7 @@ async def test_get_running_agent_loops_remotely():
 
 
 @pytest.mark.asyncio
-async def test_init_new_local_session():
+async def test_init_new_local_session(mock_llm_registry):
     session_instance = AsyncMock()
     session_instance.agent_session = MagicMock()
     session_instance.agent_session.event_stream.cur_id = 1
@@ -151,7 +158,7 @@ async def test_init_new_local_session():
 
 
 @pytest.mark.asyncio
-async def test_join_local_session():
+async def test_join_local_session(mock_llm_registry):
     session_instance = AsyncMock()
     session_instance.agent_session = MagicMock()
     session_instance.agent_session.event_stream.cur_id = 1
@@ -241,7 +248,7 @@ async def test_join_cluster_session():
 
 
 @pytest.mark.asyncio
-async def test_add_to_local_event_stream():
+async def test_add_to_local_event_stream(mock_llm_registry):
     session_instance = AsyncMock()
     session_instance.agent_session = MagicMock()
     session_instance.agent_session.event_stream.cur_id = 1

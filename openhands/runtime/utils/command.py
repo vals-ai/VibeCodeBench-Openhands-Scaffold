@@ -27,6 +27,7 @@ def get_action_execution_server_startup_command(
     override_username: str | None = None,
     main_module: str = DEFAULT_MAIN_MODULE,
     python_executable: str = 'python',
+    start_docker: bool = True,
 ) -> list[str]:
     sandbox_config = app_config.sandbox
     logger.debug(f'app_config {vars(app_config)}')
@@ -76,16 +77,19 @@ def get_action_execution_server_startup_command(
     ]
 
     if not app_config.enable_browser:
-        base_cmd.append("--no-enable-browser")
+        base_cmd.append('--no-enable-browser')
+
+    if not start_docker:
+        return base_cmd
 
     dockerd_cmd = [
-        "bash",
-        "-c",
-        "docker info >/dev/null 2>&1 || (sudo dockerd > /tmp/docker.log 2>&1 & sleep 10); "
-        + " ".join(base_cmd),
+        'bash',
+        '-c',
+        'docker info >/dev/null 2>&1 || (sudo dockerd > /tmp/docker.log 2>&1 & sleep 10); '
+        + ' '.join(base_cmd),
     ]
     logger.debug(
-        f"get_action_execution_server_startup_command (with dockerd): {dockerd_cmd}"
+        f'get_action_execution_server_startup_command (with dockerd): {dockerd_cmd}'
     )
 
     return dockerd_cmd

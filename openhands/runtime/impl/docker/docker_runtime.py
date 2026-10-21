@@ -541,7 +541,9 @@ class DockerRuntime(ActionExecutionClient):
             self.close()
             raise e
 
-    def _recreate_container_if_not_found(self, exc: NotFound, error_message: str | None = None) -> None:
+    def _recreate_container_if_not_found(
+        self, exc: NotFound, error_message: str | None = None
+    ) -> None:
         if self.attach_to_existing:
             if error_message:
                 raise AgentRuntimeNotFoundError(error_message) from exc
@@ -556,7 +558,8 @@ class DockerRuntime(ActionExecutionClient):
         self.init_container()
         if not self.container:
             raise AgentRuntimeNotFoundError(
-                error_message or f'Container {self.container_name} could not be recreated.'
+                error_message
+                or f'Container {self.container_name} could not be recreated.'
             ) from exc
 
     def _attach_to_container(self) -> None:

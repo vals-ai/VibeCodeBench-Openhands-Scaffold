@@ -1,7 +1,8 @@
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from model_library.base import QueryResult
 
 from openhands.core.config import LLMConfig
 from openhands.events.action.message import MessageAction
@@ -22,18 +23,12 @@ def pr_handler():
 
 @pytest.fixture
 def mock_llm_success_response():
-    return MagicMock(
-        choices=[
-            MagicMock(
-                message=MagicMock(
-                    content="""--- success
+    return QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 The changes look good"""
-                )
-            )
-        ]
     )
 
 
@@ -83,18 +78,13 @@ def test_guess_success_review_threads_litellm_call():
     llm_config = LLMConfig(model='test-model', api_key='test-key')
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 The changes successfully address the feedback."""
-            )
-        )
-    ]
+    )
 
     # Test the guess_success method
     with patch.object(LLM, 'completion') as mock_completion:
@@ -106,7 +96,7 @@ The changes successfully address the feedback."""
 
         # Check first call
         first_call = mock_completion.call_args_list[0]
-        first_prompt = first_call[1]['messages'][0]['content']
+        first_prompt = first_call[1]['input'][0].text
         assert (
             'Issue descriptions:\n'
             + json.dumps(['Issue 1 description', 'Issue 2 description'], indent=4)
@@ -125,7 +115,7 @@ The changes successfully address the feedback."""
 
         # Check second call
         second_call = mock_completion.call_args_list[1]
-        second_prompt = second_call[1]['messages'][0]['content']
+        second_prompt = second_call[1]['input'][0].text
         assert (
             'Issue descriptions:\n'
             + json.dumps(['Issue 1 description', 'Issue 2 description'], indent=4)
@@ -184,18 +174,13 @@ def test_guess_success_thread_comments_litellm_call():
     llm_config = LLMConfig(model='test-model', api_key='test-key')
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 The changes successfully address the feedback."""
-            )
-        )
-    ]
+    )
 
     # Test the guess_success method
     with patch.object(LLM, 'completion') as mock_completion:
@@ -205,7 +190,7 @@ The changes successfully address the feedback."""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert (
@@ -252,8 +237,7 @@ def test_check_feedback_with_llm():
 
     for case in test_cases:
         # Mock the LLM response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content=case['response']))]
+        mock_response = QueryResult(output_text=case['response'])
 
         # Test the function
         with patch.object(LLM, 'completion', return_value=mock_response):
@@ -281,18 +265,13 @@ def test_check_review_thread_with_git_patch():
     git_patch = 'diff --git a/src/file1.py b/src/file1.py\n+"""Added docstring."""\n'
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 Changes look good"""
-            )
-        )
-    ]
+    )
 
     # Test the function
     with patch.object(LLM, 'completion') as mock_completion:
@@ -304,7 +283,7 @@ Changes look good"""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert 'Issue descriptions:\n' + issues_context in prompt
@@ -339,18 +318,13 @@ def test_check_review_thread():
     last_message = 'I have fixed the formatting and added docstrings'
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 Changes look good"""
-            )
-        )
-    ]
+    )
 
     # Test the function
     with patch.object(LLM, 'completion') as mock_completion:
@@ -362,7 +336,7 @@ Changes look good"""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert 'Issue descriptions:\n' + issues_context in prompt
@@ -398,18 +372,13 @@ def test_check_thread_comments_with_git_patch():
     git_patch = 'diff --git a/src/file1.py b/src/file1.py\n+try:\n+    validate_input()\n+except ValueError:\n+    handle_error()\n'
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 Changes look good"""
-            )
-        )
-    ]
+    )
 
     # Test the function
     with patch.object(LLM, 'completion') as mock_completion:
@@ -421,7 +390,7 @@ Changes look good"""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert 'Issue descriptions:\n' + issues_context in prompt
@@ -454,18 +423,13 @@ def test_check_thread_comments():
     last_message = 'I have added error handling and input validation'
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 Changes look good"""
-            )
-        )
-    ]
+    )
 
     # Test the function
     with patch.object(LLM, 'completion') as mock_completion:
@@ -477,7 +441,7 @@ Changes look good"""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert 'Issue descriptions:\n' + issues_context in prompt
@@ -510,18 +474,13 @@ def test_check_review_comments_with_git_patch():
     git_patch = 'diff --git a/src/file1.py b/src/file1.py\n+"""This module does X."""\n+def func():\n+    """Do Y."""\n'
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 Changes look good"""
-            )
-        )
-    ]
+    )
 
     # Test the function
     with patch.object(LLM, 'completion') as mock_completion:
@@ -533,7 +492,7 @@ Changes look good"""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert 'Issue descriptions:\n' + issues_context in prompt
@@ -566,18 +525,13 @@ def test_check_review_comments():
     last_message = 'I have improved code readability and added comments'
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 Changes look good"""
-            )
-        )
-    ]
+    )
 
     # Test the function
     with patch.object(LLM, 'completion') as mock_completion:
@@ -589,7 +543,7 @@ Changes look good"""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert 'Issue descriptions:\n' + issues_context in prompt
@@ -638,18 +592,13 @@ def test_guess_success_review_comments_litellm_call():
     ]
 
     # Mock the LLM response
-    mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content="""--- success
+    mock_response = QueryResult(
+        output_text="""--- success
 true
 
 --- explanation
 The changes successfully address the feedback."""
-            )
-        )
-    ]
+    )
 
     with patch.object(LLM, 'completion') as mock_completion:
         mock_completion.return_value = mock_response
@@ -658,7 +607,7 @@ The changes successfully address the feedback."""
         # Verify the completion() call
         mock_completion.assert_called_once()
         call_args = mock_completion.call_args
-        prompt = call_args[1]['messages'][0]['content']
+        prompt = call_args[1]['input'][0].text
 
         # Check prompt content
         assert (

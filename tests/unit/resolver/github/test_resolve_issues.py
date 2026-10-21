@@ -3,6 +3,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from model_library.base import QueryResult
 
 from openhands.core.config import LLMConfig
 from openhands.events.action import CmdRunAction, MessageAction
@@ -711,14 +712,9 @@ def test_guess_success():
     mock_history = [create_cmd_output(exit_code=0, content='', command='cd /workspace')]
     mock_llm_config = LLMConfig(model='test_model', api_key='test_api_key')
 
-    mock_completion_response = MagicMock()
-    mock_completion_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content='--- success\ntrue\n--- explanation\nIssue resolved successfully'
-            )
-        )
-    ]
+    mock_completion_response = QueryResult(
+        output_text='--- success\ntrue\n--- explanation\nIssue resolved successfully'
+    )
     issue_handler = ServiceContextIssue(
         GithubIssueHandler('owner', 'repo', 'token'), mock_llm_config
     )
@@ -751,14 +747,9 @@ def test_guess_success_with_thread_comments():
     mock_history = [MagicMock(message='I have added tests for this case')]
     mock_llm_config = LLMConfig(model='test_model', api_key='test_api_key')
 
-    mock_completion_response = MagicMock()
-    mock_completion_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content='--- success\ntrue\n--- explanation\nTests have been added to verify thread comments handling'
-            )
-        )
-    ]
+    mock_completion_response = QueryResult(
+        output_text='--- success\ntrue\n--- explanation\nTests have been added to verify thread comments handling'
+    )
     issue_handler = ServiceContextIssue(
         GithubIssueHandler('owner', 'repo', 'token'), mock_llm_config
     )
@@ -831,14 +822,9 @@ def test_guess_success_failure():
     mock_history = [MagicMock(message='I have added tests for this case')]
     mock_llm_config = LLMConfig(model='test_model', api_key='test_api_key')
 
-    mock_completion_response = MagicMock()
-    mock_completion_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content='--- success\ntrue\n--- explanation\nTests have been added to verify thread comments handling'
-            )
-        )
-    ]
+    mock_completion_response = QueryResult(
+        output_text='--- success\ntrue\n--- explanation\nTests have been added to verify thread comments handling'
+    )
     issue_handler = ServiceContextIssue(
         GithubIssueHandler('owner', 'repo', 'token'), mock_llm_config
     )
@@ -866,14 +852,9 @@ def test_guess_success_negative_case():
     mock_history = [create_cmd_output(exit_code=0, content='', command='cd /workspace')]
     mock_llm_config = LLMConfig(model='test_model', api_key='test_api_key')
 
-    mock_completion_response = MagicMock()
-    mock_completion_response.choices = [
-        MagicMock(
-            message=MagicMock(
-                content='--- success\nfalse\n--- explanation\nIssue not resolved'
-            )
-        )
-    ]
+    mock_completion_response = QueryResult(
+        output_text='--- success\nfalse\n--- explanation\nIssue not resolved'
+    )
     issue_handler = ServiceContextIssue(
         GithubIssueHandler('owner', 'repo', 'token'), mock_llm_config
     )
@@ -901,10 +882,7 @@ def test_guess_success_invalid_output():
     mock_history = [create_cmd_output(exit_code=0, content='', command='cd /workspace')]
     mock_llm_config = LLMConfig(model='test_model', api_key='test_api_key')
 
-    mock_completion_response = MagicMock()
-    mock_completion_response.choices = [
-        MagicMock(message=MagicMock(content='This is not a valid output'))
-    ]
+    mock_completion_response = QueryResult(output_text='This is not a valid output')
     issue_handler = ServiceContextIssue(
         GithubIssueHandler('owner', 'repo', 'token'), mock_llm_config
     )

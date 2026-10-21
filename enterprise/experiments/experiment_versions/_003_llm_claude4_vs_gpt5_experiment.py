@@ -17,7 +17,7 @@ from openhands.core.logger import openhands_logger as logger
 from openhands.server.session.conversation_init_data import ConversationInitData
 
 
-def _get_model_variant(user_id: str | None, conversation_id: str) -> str | None:
+def _get_model_variant(user_id: str | None, conversation_id: str) -> bool | str | None:
     if not EXPERIMENT_CLAUDE4_VS_GPT5:
         logger.info(
             'experiment_manager:ab_testing:skipped',

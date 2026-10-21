@@ -2,6 +2,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -36,8 +37,10 @@ def test_client():
             AsyncMock(return_value=''),
         ),
     ):
-        client = TestClient(app)
-        yield client
+        application = FastAPI()
+        application.include_router(app)
+        with TestClient(application) as client:
+            yield client
 
 
 @pytest.fixture

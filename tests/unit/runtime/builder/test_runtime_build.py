@@ -1,10 +1,9 @@
-import hashlib
 import os
 import tempfile
 import uuid
 from importlib.metadata import version
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, mock_open, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import docker
 import pytest
@@ -105,12 +104,16 @@ def test_public_build_excludes_local_model_proxy(tmp_path, monkeypatch):
         (project / name).mkdir(parents=True)
     (project / 'model-proxy' / 'private.txt').write_text('private source')
     files = [
-        'pyproject.toml', 'poetry.lock',
-        'requirements-model-library.txt', 'requirements-overrides.txt',
+        'pyproject.toml',
+        'poetry.lock',
+        'requirements-model-library.txt',
+        'requirements-overrides.txt',
     ]
     for name in files:
         (project / name).write_text(name)
-    monkeypatch.setattr(openhands, '__file__', str(project / 'openhands' / '__init__.py'))
+    monkeypatch.setattr(
+        openhands, '__file__', str(project / 'openhands' / '__init__.py')
+    )
     output = tmp_path / 'build'
 
     prep_build_folder(output, DEFAULT_BASE_IMAGE, BuildFromImageType.SCRATCH, None)
@@ -123,41 +126,35 @@ def test_public_build_excludes_local_model_proxy(tmp_path, monkeypatch):
     assert '-r requirements-model-library.txt' in dockerfile
 
 
-def test_get_hash_for_lock_files():
-    with patch('builtins.open', mock_open(read_data='mock-data'.encode())):
-        hash = get_hash_for_lock_files('some_base_image', enable_browser=True)
-        # Since we mocked open to always return "mock_data", the hash is the result
-        # of hashing the name of the base image followed by "mock-data" twice
-        md5 = hashlib.md5()
-        md5.update('some_base_image'.encode())
-        for _ in range(2):
-            md5.update('mock-data'.encode())
-        assert hash == truncate_hash(md5.hexdigest())
+@pytest.mark.parametrize(
+    'changed_file',
+    [
+        'pyproject.toml',
+        'poetry.lock',
+        'requirements-model-library.txt',
+        'requirements-overrides.txt',
+    ],
+)
+def test_dependency_image_hash_tracks_install_inputs(
+    tmp_path, monkeypatch, changed_file
+):
+    source = tmp_path / 'openhands'
+    source.mkdir()
+    monkeypatch.setattr(openhands, '__file__', str(source / '__init__.py'))
+    for name in [
+        'pyproject.toml',
+        'poetry.lock',
+        'requirements-model-library.txt',
+        'requirements-overrides.txt',
+    ]:
+        (tmp_path / name).write_text(name)
 
-
-def test_get_hash_for_lock_files_different_enable_browser():
-    with patch('builtins.open', mock_open(read_data='mock-data'.encode())):
-        hash_true = get_hash_for_lock_files('some_base_image', enable_browser=True)
-        hash_false = get_hash_for_lock_files('some_base_image', enable_browser=False)
-
-        # Hash with enable_browser=True should not include the enable_browser value
-        md5_true = hashlib.md5()
-        md5_true.update('some_base_image'.encode())
-        for _ in range(2):
-            md5_true.update('mock-data'.encode())
-        expected_hash_true = truncate_hash(md5_true.hexdigest())
-
-        # Hash with enable_browser=False should include the enable_browser value
-        md5_false = hashlib.md5()
-        md5_false.update('some_base_image'.encode())
-        md5_false.update('False'.encode())  # enable_browser=False is included
-        for _ in range(2):
-            md5_false.update('mock-data'.encode())
-        expected_hash_false = truncate_hash(md5_false.hexdigest())
-
-        assert hash_true == expected_hash_true
-        assert hash_false == expected_hash_false
-        assert hash_true != hash_false  # They should be different
+    original = get_hash_for_lock_files(DEFAULT_BASE_IMAGE)
+    assert get_hash_for_lock_files(DEFAULT_BASE_IMAGE) == original
+    assert get_hash_for_lock_files('other-base-image') != original
+    assert get_hash_for_lock_files(DEFAULT_BASE_IMAGE, enable_browser=False) != original
+    (tmp_path / changed_file).write_text('changed installation input')
+    assert get_hash_for_lock_files(DEFAULT_BASE_IMAGE) != original
 
 
 def test_get_hash_for_source_files():

@@ -75,6 +75,7 @@ def response_to_actions(
     response: QueryResult, mcp_tool_names: list[str] | None = None
 ) -> list[Action]:
     actions: list[Action] = []
+    action: Action
     if response.tool_calls:
         # Check if there's output_text. If so, add it to the thought
         thought = ''
@@ -547,7 +548,9 @@ def response_to_actions(
         raw = getattr(response, 'raw', None)
         response_id = raw.get('id') if raw else None
         if response_id is None:
-            response_id = getattr(getattr(response, 'extras', None), 'response_id', None)
+            response_id = getattr(
+                getattr(response, 'extras', None), 'response_id', None
+            )
         if response_id is not None:
             assert isinstance(response_id, str)
             action.response_id = response_id

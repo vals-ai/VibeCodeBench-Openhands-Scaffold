@@ -3,13 +3,9 @@
 This is similar to the functionality of `CodeActResponseParser`.
 """
 
-import json
 import shlex
 
-from litellm import (
-    ChatCompletionToolParam,
-    ModelResponse,
-)
+from model_library.base import QueryResult, ToolBody, ToolDefinition
 
 from openhands.agenthub.codeact_agent.function_calling import (
     combine_thought,
@@ -108,37 +104,27 @@ def glob_to_cmdrun(pattern: str, path: str = '.') -> str:
 
 
 def response_to_actions(
-    response: ModelResponse, mcp_tool_names: list[str] | None = None
+    response: QueryResult, mcp_tool_names: list[str] | None = None
 ) -> list[Action]:
     actions: list[Action] = []
-    assert len(response.choices) == 1, 'Only one choice is supported for now'
-    choice = response.choices[0]
-    assistant_msg = choice.message
-    if hasattr(assistant_msg, 'tool_calls') and assistant_msg.tool_calls:
-        # Check if there's assistant_msg.content. If so, add it to the thought
-        thought = ''
-        if isinstance(assistant_msg.content, str):
-            thought = assistant_msg.content
-        elif isinstance(assistant_msg.content, list):
-            for msg in assistant_msg.content:
-                if msg['type'] == 'text':
-                    thought += msg['text']
+    if response.tool_calls:
+        thought = response.output_text or response.reasoning or ''
 
         # Process each tool call to OpenHands action
-        for i, tool_call in enumerate(assistant_msg.tool_calls):
+        for i, tool_call in enumerate(response.tool_calls):
             action: Action
             logger.debug(f'Tool call in function_calling.py: {tool_call}')
-            try:
-                arguments = json.loads(tool_call.function.arguments)
-            except json.decoder.JSONDecodeError as e:
+            arguments = tool_call.parsed_args
+            if arguments is None:
                 raise FunctionCallValidationError(
-                    f'Failed to parse tool call arguments: {tool_call.function.arguments}'
-                ) from e
+                    f'Failed to parse tool call arguments: {tool_call.args}',
+                    tool_call=tool_call,
+                )
 
             # ================================================
             # AgentFinishAction
             # ================================================
-            if tool_call.function.name == FinishTool['function']['name']:
+            if tool_call.name == FinishTool.name:
                 action = AgentFinishAction(
                     final_thought=arguments.get('message', ''),
                 )
@@ -146,10 +132,10 @@ def response_to_actions(
             # ================================================
             # ViewTool (ACI-based file viewer, READ-ONLY)
             # ================================================
-            elif tool_call.function.name == ViewTool['function']['name']:
+            elif tool_call.name == ViewTool['function']['name']:
                 if 'path' not in arguments:
                     raise FunctionCallValidationError(
-                        f'Missing required argument "path" in tool call {tool_call.function.name}'
+                        f'Missing required argument "path" in tool call {tool_call.name}'
                     )
                 action = FileReadAction(
                     path=arguments['path'],
@@ -160,16 +146,16 @@ def response_to_actions(
             # ================================================
             # AgentThinkAction
             # ================================================
-            elif tool_call.function.name == ThinkTool['function']['name']:
+            elif tool_call.name == ThinkTool.name:
                 action = AgentThinkAction(thought=arguments.get('thought', ''))
 
             # ================================================
             # GrepTool (file content search)
             # ================================================
-            elif tool_call.function.name == GrepTool['function']['name']:
+            elif tool_call.name == GrepTool['function']['name']:
                 if 'pattern' not in arguments:
                     raise FunctionCallValidationError(
-                        f'Missing required argument "pattern" in tool call {tool_call.function.name}'
+                        f'Missing required argument "pattern" in tool call {tool_call.name}'
                     )
 
                 pattern = arguments['pattern']
@@ -182,10 +168,10 @@ def response_to_actions(
             # ================================================
             # GlobTool (file pattern matching)
             # ================================================
-            elif tool_call.function.name == GlobTool['function']['name']:
+            elif tool_call.name == GlobTool['function']['name']:
                 if 'pattern' not in arguments:
                     raise FunctionCallValidationError(
-                        f'Missing required argument "pattern" in tool call {tool_call.function.name}'
+                        f'Missing required argument "pattern" in tool call {tool_call.name}'
                     )
 
                 pattern = arguments['pattern']
@@ -197,15 +183,15 @@ def response_to_actions(
             # ================================================
             # MCPAction (MCP)
             # ================================================
-            elif mcp_tool_names and tool_call.function.name in mcp_tool_names:
+            elif mcp_tool_names and tool_call.name in mcp_tool_names:
                 action = MCPAction(
-                    name=tool_call.function.name,
+                    name=tool_call.name,
                     arguments=arguments,
                 )
 
             else:
                 raise FunctionCallNotExistsError(
-                    f'Tool {tool_call.function.name} is not registered. (arguments: {arguments}). Please check the tool name and retry with an existing tool.'
+                    f'Tool {tool_call.name} is not registered. (arguments: {arguments}). Please check the tool name and retry with an existing tool.'
                 )
 
             # We only add thought to the first action
@@ -214,15 +200,15 @@ def response_to_actions(
             # Add metadata for tool calling
             action.tool_call_metadata = ToolCallMetadata(
                 tool_call_id=tool_call.id,
-                function_name=tool_call.function.name,
+                function_name=tool_call.name,
                 model_response=response,
-                total_calls_in_response=len(assistant_msg.tool_calls),
+                total_calls_in_response=len(response.tool_calls),
             )
             actions.append(action)
     else:
         actions.append(
             MessageAction(
-                content=str(assistant_msg.content) if assistant_msg.content else '',
+                content=response.output_text or '',
                 wait_for_response=True,
             )
         )
@@ -232,17 +218,27 @@ def response_to_actions(
     # and actions with tool calls (e.g. CmdRunAction, IPythonRunCellAction, etc.)
     # with the token usage data
     for action in actions:
-        action.response_id = response.id
+        if response.extras.response_id is not None:
+            action.response_id = response.extras.response_id
 
     assert len(actions) >= 1
     return actions
 
 
-def get_tools() -> list[ChatCompletionToolParam]:
-    return [
-        ThinkTool,
-        FinishTool,
-        GrepTool,
-        GlobTool,
-        ViewTool,
-    ]
+def get_tools() -> list[ToolDefinition]:
+    tools = [ThinkTool, FinishTool]
+    legacy_tools = [GrepTool, GlobTool, ViewTool]
+    for tool in legacy_tools:
+        function = tool['function']
+        tools.append(
+            ToolDefinition(
+                name=function['name'],
+                body=ToolBody(
+                    name=function['name'],
+                    description=function['description'],
+                    properties=function['parameters']['properties'],
+                    required=function['parameters']['required'],
+                ),
+            )
+        )
+    return tools

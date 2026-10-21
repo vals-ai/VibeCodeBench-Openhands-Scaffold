@@ -3,8 +3,13 @@ from typing import Union
 from unittest.mock import Mock
 
 import pytest
-from litellm import ChatCompletionMessageToolCall
-from model_library.base import QueryResult, ToolCall
+from model_library.base import (
+    QueryResult,
+    RawResponse,
+    TextInput,
+    ToolCall,
+    ToolDefinition,
+)
 
 from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
 from openhands.agenthub.codeact_agent.function_calling import (
@@ -37,7 +42,6 @@ from openhands.core.exceptions import (
     FunctionCallNotExistsError,
     FunctionCallValidationError,
 )
-from openhands.core.message import ImageContent, Message, TextContent
 from openhands.events.action import (
     CmdRunAction,
     MessageAction,
@@ -45,12 +49,9 @@ from openhands.events.action import (
 )
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import EventSource
-from openhands.events.observation.commands import (
-    CmdOutputObservation,
-)
 from openhands.events.tool import ToolCallMetadata
+from openhands.llm.llm import LLM
 from openhands.llm.llm_registry import LLMRegistry
-from openhands.memory.condenser import View
 
 
 @pytest.fixture
@@ -58,7 +59,12 @@ def create_llm_registry():
     def _get_registry(llm_config):
         config = OpenHandsConfig()
         config.set_llm_config(llm_config)
-        return LLMRegistry(config=config)
+        registry = Mock(spec=LLMRegistry)
+        llm = Mock(spec=LLM)
+        llm.config = llm_config
+        registry.get_llm_from_agent_config.return_value = llm
+        registry.get_router.return_value = llm
+        return registry
 
     return _get_registry
 
@@ -91,7 +97,7 @@ def test_agent_with_default_config_has_default_tools(create_llm_registry):
         config=config, llm_registry=create_llm_registry(llm_config)
     )
     assert len(codeact_agent.tools) > 0
-    default_tool_names = [tool['function']['name'] for tool in codeact_agent.tools]
+    default_tool_names = [tool.name for tool in codeact_agent.tools]
     assert {
         'browser',
         'execute_bash',
@@ -104,9 +110,7 @@ def test_agent_with_default_config_has_default_tools(create_llm_registry):
 
 @pytest.fixture
 def mock_state() -> State:
-    state = Mock(spec=State)
-    state.history = []
-    state.extra_data = {}
+    state = State()
 
     return state
 
@@ -248,39 +252,36 @@ def test_response_batch_uses_subclass_parser():
 
 def test_cmd_run_tool():
     CmdRunTool = create_cmd_run_tool()
-    assert CmdRunTool['type'] == 'function'
-    assert CmdRunTool['function']['name'] == 'execute_bash'
-    assert 'command' in CmdRunTool['function']['parameters']['properties']
-    assert 'security_risk' in CmdRunTool['function']['parameters']['properties']
-    assert CmdRunTool['function']['parameters']['required'] == [
+    assert CmdRunTool.name == 'execute_bash'
+    assert 'command' in CmdRunTool.body.properties
+    assert 'security_risk' in CmdRunTool.body.properties
+    assert CmdRunTool.body.required == [
         'command',
         'security_risk',
     ]
 
 
 def test_ipython_tool():
-    assert IPythonTool['type'] == 'function'
-    assert IPythonTool['function']['name'] == 'execute_ipython_cell'
-    assert 'code' in IPythonTool['function']['parameters']['properties']
-    assert 'security_risk' in IPythonTool['function']['parameters']['properties']
-    assert IPythonTool['function']['parameters']['required'] == [
+    assert IPythonTool.name == 'execute_ipython_cell'
+    assert 'code' in IPythonTool.body.properties
+    assert 'security_risk' in IPythonTool.body.properties
+    assert IPythonTool.body.required == [
         'code',
         'security_risk',
     ]
 
 
 def test_llm_based_file_edit_tool():
-    assert LLMBasedFileEditTool['type'] == 'function'
-    assert LLMBasedFileEditTool['function']['name'] == 'edit_file'
+    assert LLMBasedFileEditTool.name == 'edit_file'
 
-    properties = LLMBasedFileEditTool['function']['parameters']['properties']
+    properties = LLMBasedFileEditTool.body.properties
     assert 'path' in properties
     assert 'content' in properties
     assert 'start' in properties
     assert 'end' in properties
     assert 'security_risk' in properties
 
-    assert LLMBasedFileEditTool['function']['parameters']['required'] == [
+    assert LLMBasedFileEditTool.body.required == [
         'path',
         'content',
         'security_risk',
@@ -289,10 +290,9 @@ def test_llm_based_file_edit_tool():
 
 def test_str_replace_editor_tool():
     StrReplaceEditorTool = create_str_replace_editor_tool()
-    assert StrReplaceEditorTool['type'] == 'function'
-    assert StrReplaceEditorTool['function']['name'] == 'str_replace_editor'
+    assert StrReplaceEditorTool.name == 'str_replace_editor'
 
-    properties = StrReplaceEditorTool['function']['parameters']['properties']
+    properties = StrReplaceEditorTool.body.properties
     assert 'command' in properties
     assert 'path' in properties
     assert 'file_text' in properties
@@ -301,7 +301,7 @@ def test_str_replace_editor_tool():
     assert 'insert_line' in properties
     assert 'security_risk' in properties
 
-    assert StrReplaceEditorTool['function']['parameters']['required'] == [
+    assert StrReplaceEditorTool.body.required == [
         'command',
         'path',
         'security_risk',
@@ -309,11 +309,10 @@ def test_str_replace_editor_tool():
 
 
 def test_browser_tool():
-    assert BrowserTool['type'] == 'function'
-    assert BrowserTool['function']['name'] == 'browser'
-    assert 'code' in BrowserTool['function']['parameters']['properties']
-    assert 'security_risk' in BrowserTool['function']['parameters']['properties']
-    assert BrowserTool['function']['parameters']['required'] == [
+    assert BrowserTool.name == 'browser'
+    assert 'code' in BrowserTool.body.properties
+    assert 'security_risk' in BrowserTool.body.properties
+    assert BrowserTool.body.required == [
         'code',
         'security_risk',
     ]
@@ -336,202 +335,75 @@ def test_browser_tool():
     assert 'upload_file(' in description
 
     # Test BrowserTool definition
-    assert BrowserTool['type'] == 'function'
-    assert BrowserTool['function']['name'] == 'browser'
-    assert BrowserTool['function']['description'] == _BROWSER_DESCRIPTION
-    assert BrowserTool['function']['parameters']['type'] == 'object'
-    assert 'code' in BrowserTool['function']['parameters']['properties']
-    assert BrowserTool['function']['parameters']['required'] == [
+    assert BrowserTool.name == 'browser'
+    assert BrowserTool.body.description == _BROWSER_DESCRIPTION
+    assert 'code' in BrowserTool.body.properties
+    assert BrowserTool.body.required == [
         'code',
         'security_risk',
     ]
-    assert (
-        BrowserTool['function']['parameters']['properties']['code']['type'] == 'string'
-    )
-    assert 'description' in BrowserTool['function']['parameters']['properties']['code']
+    assert BrowserTool.body.properties['code']['type'] == 'string'
+    assert 'description' in BrowserTool.body.properties['code']
 
 
 def test_response_to_actions_invalid_tool():
-    # Test response with invalid tool call
-    mock_response = Mock()
-    mock_response.choices = [Mock()]
-    mock_response.choices[0].message = Mock()
-    mock_response.choices[0].message.content = 'Invalid tool'
-    mock_response.choices[0].message.tool_calls = [Mock()]
-    mock_response.choices[0].message.tool_calls[0].id = 'tool_call_10'
-    mock_response.choices[0].message.tool_calls[0].function = Mock()
-    mock_response.choices[0].message.tool_calls[0].function.name = 'invalid_tool'
-    mock_response.choices[0].message.tool_calls[0].function.arguments = '{}'
-
+    response = QueryResult(
+        tool_calls=[ToolCall(id='bad', name='invalid_tool', args={})]
+    )
     with pytest.raises(FunctionCallNotExistsError):
-        codeact_response_to_actions(mock_response)
+        codeact_response_to_actions(response)
     with pytest.raises(FunctionCallNotExistsError):
-        readonly_response_to_actions(mock_response)
+        readonly_response_to_actions(response)
 
 
 def test_step_with_no_pending_actions(mock_state: State, create_llm_registry):
-    # Mock the LLM response
-    mock_response = Mock()
-    mock_response.id = 'mock_id'
-    mock_response.total_calls_in_response = 1
-    mock_response.choices = [Mock()]
-    mock_response.choices[0].message = Mock()
-    mock_response.choices[0].message.content = 'Task completed'
-    mock_response.choices[0].message.tool_calls = []
-
-    mock_config = Mock()
-    mock_config.model = 'mock_model'
-
-    llm = Mock()
-    llm.config = mock_config
-    llm.completion = Mock(return_value=mock_response)
-    llm.is_function_calling_active = Mock(return_value=True)  # Enable function calling
-    llm.is_caching_prompt_active = Mock(return_value=False)
-    llm.format_messages_for_llm = Mock(return_value=[])  # Mock message formatting
-
-    # Create agent with mocked LLM
-    llm_config = LLMConfig(model='gpt-4o', api_key='test_key')
-    config = AgentConfig()
-    config.enable_prompt_extensions = False
-    agent = CodeActAgent(config=config, llm_registry=create_llm_registry(llm_config))
-    # Replace the LLM with our mock after creation
-    agent.llm = llm
-
-    # Test step with no pending actions
-    mock_state.latest_user_message = None
-    mock_state.latest_user_message_id = None
-    mock_state.latest_user_message_timestamp = None
-    mock_state.latest_user_message_cause = None
-    mock_state.latest_user_message_timeout = None
-    mock_state.latest_user_message_llm_metrics = None
-    mock_state.latest_user_message_tool_call_metadata = None
-
-    # Add initial user message to history
-    initial_user_message = MessageAction(content='Initial user message')
-    initial_user_message._source = EventSource.USER
-    mock_state.history = [initial_user_message]
-
-    # Mock the view returned by condenser
-    mock_view = View(events=mock_state.history)
-    mock_state.view = mock_view
-
+    agent = CodeActAgent(
+        config=AgentConfig(), llm_registry=create_llm_registry(LLMConfig(model='test'))
+    )
+    mock_state.inputs = [TextInput(text='Initial user message')]
+    agent.llm.completion.return_value = QueryResult(output_text='Task completed')
     action = agent.step(mock_state)
     assert isinstance(action, MessageAction)
     assert action.content == 'Task completed'
+    assert mock_state.inputs == []
 
 
 @pytest.mark.parametrize('agent_type', ['CodeActAgent', 'ReadOnlyAgent'])
 def test_correct_tool_description_loaded_based_on_model_name(
     agent_type, create_llm_registry
 ):
-    """Tests that the simplified tool descriptions are loaded for specific models."""
-    o3_mock_config = LLMConfig(model='mock_o3_model', api_key='test_key')
-    if agent_type == 'CodeActAgent':
-        from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
-
-        agent_class = CodeActAgent
-    else:
-        from openhands.agenthub.readonly_agent.readonly_agent import ReadOnlyAgent
-
-        agent_class = ReadOnlyAgent
-
-    agent = agent_class(
-        config=AgentConfig(),
-        llm_registry=create_llm_registry(o3_mock_config),
-    )
-    for tool in agent.tools:
-        # Assert all descriptions have less than 1024 characters
-        assert len(tool['function']['description']) < 1024
-
-    sonnect_mock_config = LLMConfig(model='mock_sonnet_model', api_key='test_key')
-    agent = agent_class(
-        config=AgentConfig(),
-        llm_registry=create_llm_registry(sonnect_mock_config),
-    )
-    # Assert existence of the detailed tool descriptions that are longer than 1024 characters
-    if agent_type == 'CodeActAgent':
-        # This only holds for CodeActAgent
-        assert any(len(tool['function']['description']) > 1024 for tool in agent.tools)
+    agent_class = CodeActAgent if agent_type == 'CodeActAgent' else ReadOnlyAgent
+    agents = [
+        agent_class(
+            config=AgentConfig(),
+            llm_registry=create_llm_registry(LLMConfig(model=model)),
+        )
+        for model in ('mock_o3_model', 'mock_sonnet_model')
+    ]
+    assert agents[0].tools == agents[1].tools
+    assert all(isinstance(tool, ToolDefinition) for tool in agents[0].tools)
+    assert all(tool.body.description for tool in agents[0].tools)
 
 
-def test_mismatched_tool_call_events_and_auto_add_system_message(
-    agent, mock_state: State
-):
-    """Tests that the agent can convert mismatched tool call events (i.e., an observation with no corresponding action) into messages.
+def test_step_passes_inputs_and_retains_provider_history(agent, mock_state: State):
+    inputs = [
+        TextInput(text='First user message'),
+        TextInput(text='Second user message'),
+    ]
+    history = [RawResponse(response={'id': 'previous'})]
+    next_history = [*history, *inputs, RawResponse(response={'id': 'next'})]
+    mock_state.inputs = inputs.copy()
+    agent.history = history
 
-    This also tests that the system message is automatically added to the event stream if SystemMessageAction is not present.
-    """
-    tool_call_metadata = Mock(
-        spec=ToolCallMetadata,
-        model_response=Mock(
-            id='model_response_0',
-            choices=[
-                Mock(
-                    message=Mock(
-                        role='assistant',
-                        content='',
-                        tool_calls=[
-                            Mock(spec=ChatCompletionMessageToolCall, id='tool_call_0')
-                        ],
-                    )
-                )
-            ],
-        ),
-        tool_call_id='tool_call_0',
-        function_name='foo',
-    )
+    def complete(**kwargs):
+        assert kwargs == {'input': inputs, 'history': history, 'tools': agent.tools}
+        return QueryResult(output_text='Done', history=next_history)
 
-    action = CmdRunAction('foo')
-    action._source = EventSource.AGENT
-    action.tool_call_metadata = tool_call_metadata
-
-    observation = CmdOutputObservation(content='', command_id=0, command='foo')
-    observation.tool_call_metadata = tool_call_metadata
-
-    # Add initial user message
-    initial_user_message = MessageAction(content='Initial user message')
-    initial_user_message._source = EventSource.USER
-
-    # When both events are provided, the agent should get three messages:
-    # 1. The system message (added automatically for backward compatibility)
-    # 2. The action message
-    # 3. The observation message
-    mock_state.history = [initial_user_message, action, observation]
-    messages = agent._get_messages(mock_state.history, initial_user_message)
-    assert len(messages) == 4  # System + initial user + action + observation
-    assert messages[0].role == 'system'  # First message should be the system message
-    assert (
-        messages[1].role == 'user'
-    )  # Second message should be the initial user message
-    assert messages[2].role == 'assistant'  # Third message should be the action
-    assert messages[3].role == 'tool'  # Fourth message should be the observation
-
-    # The same should hold if the events are presented out-of-order
-    mock_state.history = [initial_user_message, observation, action]
-    messages = agent._get_messages(mock_state.history, initial_user_message)
-    assert len(messages) == 4
-    assert messages[0].role == 'system'  # First message should be the system message
-    assert (
-        messages[1].role == 'user'
-    )  # Second message should be the initial user message
-
-    # If only one of the two events is present, then we should just get the system message
-    # plus any valid message from the event
-    mock_state.history = [initial_user_message, action]
-    messages = agent._get_messages(mock_state.history, initial_user_message)
-    assert (
-        len(messages) == 2
-    )  # System + initial user message, action is waiting for its observation
-    assert messages[0].role == 'system'
-    assert messages[1].role == 'user'
-
-    mock_state.history = [initial_user_message, observation]
-    messages = agent._get_messages(mock_state.history, initial_user_message)
-    assert (
-        len(messages) == 2
-    )  # System + initial user message, observation has no matching action
-    assert messages[0].role == 'system'
-    assert messages[1].role == 'user'
+    agent.llm.completion.side_effect = complete
+    action = agent.step(mock_state)
+    assert action.content == 'Done'
+    assert agent.history == next_history
+    assert mock_state.inputs == []
 
 
 def test_grep_tool():
@@ -558,66 +430,39 @@ def test_glob_tool():
 
 
 def test_think_tool():
-    assert ThinkTool['type'] == 'function'
-    assert ThinkTool['function']['name'] == 'think'
+    assert ThinkTool.name == 'think'
 
-    properties = ThinkTool['function']['parameters']['properties']
+    properties = ThinkTool.body.properties
     assert 'thought' in properties
 
-    assert ThinkTool['function']['parameters']['required'] == ['thought']
+    assert ThinkTool.body.required == ['thought']
 
 
-def test_enhance_messages_adds_newlines_between_consecutive_user_messages(
-    agent: CodeActAgent,
-):
-    """Test that _enhance_messages adds newlines between consecutive user messages."""
-    # Create consecutive user messages with various content types
-    messages = [
-        # First user message with TextContent only
-        Message(role='user', content=[TextContent(text='First user message')]),
-        # Second user message with TextContent only - should get newlines added
-        Message(role='user', content=[TextContent(text='Second user message')]),
-        # Assistant message
-        Message(role='assistant', content=[TextContent(text='Assistant response')]),
-        # Third user message with TextContent only - shouldn't get newlines
-        Message(role='user', content=[TextContent(text='Third user message')]),
-        # Fourth user message with ImageContent first, TextContent second - should get newlines
-        Message(
-            role='user',
-            content=[
-                ImageContent(image_urls=['https://example.com/image.jpg']),
-                TextContent(text='Fourth user message with image'),
-            ],
+def test_readonly_and_loc_step_use_their_registered_tools(create_llm_registry):
+    from openhands.agenthub.loc_agent.loc_agent import LocAgent
+    from openhands.events.action import FileReadAction, IPythonRunCellAction
+
+    for agent_class, name, args, expected in (
+        (ReadOnlyAgent, 'view', {'path': '/tmp/example'}, FileReadAction),
+        (
+            LocAgent,
+            'get_entity_contents',
+            {'entity_names': ['example']},
+            IPythonRunCellAction,
         ),
-        # Fifth user message with only ImageContent - no TextContent to modify
-        Message(
-            role='user',
-            content=[
-                ImageContent(image_urls=['https://example.com/another-image.jpg'])
-            ],
-        ),
-    ]
-
-    # Call _enhance_messages
-    enhanced_messages = agent.conversation_memory._apply_user_message_formatting(
-        messages
-    )
-
-    # Verify newlines were added correctly
-    assert enhanced_messages[1].content[0].text.startswith('\n\n')
-    assert enhanced_messages[1].content[0].text == '\n\nSecond user message'
-
-    # Third message follows assistant, so shouldn't have newlines
-    assert not enhanced_messages[3].content[0].text.startswith('\n\n')
-    assert enhanced_messages[3].content[0].text == 'Third user message'
-
-    # Fourth message follows user, so should have newlines in its TextContent
-    assert enhanced_messages[4].content[1].text.startswith('\n\n')
-    assert enhanced_messages[4].content[1].text == '\n\nFourth user message with image'
-
-    # Fifth message only has ImageContent, no TextContent to modify
-    assert len(enhanced_messages[5].content) == 1
-    assert isinstance(enhanced_messages[5].content[0], ImageContent)
+    ):
+        agent = agent_class(
+            config=AgentConfig(),
+            llm_registry=create_llm_registry(LLMConfig(model='test')),
+        )
+        assert name in {tool.name for tool in agent.tools}
+        response = QueryResult(tool_calls=[ToolCall(id='call', name=name, args=args)])
+        agent.llm.completion.return_value = response
+        state = State(inputs=[TextInput(text='Inspect example')])
+        action = agent.step(state)
+        assert isinstance(action, expected)
+        assert action.tool_call_metadata.model_response is response
+        assert state.pending_tool_calls['call'].name == name
 
 
 def test_get_system_message(create_llm_registry):
@@ -633,21 +478,46 @@ def test_get_system_message(create_llm_registry):
     assert isinstance(result, SystemMessageAction)
     assert 'You are OpenHands agent' in result.content
     assert len(result.tools) > 0
-    assert any(tool['function']['name'] == 'execute_bash' for tool in result.tools)
+    assert any(tool.name == 'execute_bash' for tool in result.tools)
     assert result._source == EventSource.AGENT
 
 
-def test_step_raises_error_if_no_initial_user_message(
-    agent: CodeActAgent, mock_state: State
-):
-    """Tests that step raises ValueError if the initial user message is not found."""
-    # Ensure history does NOT contain a user MessageAction
-    assistant_message = MessageAction(content='Assistant message')
-    assistant_message._source = EventSource.AGENT
-    mock_state.history = [assistant_message]
-    # Mock the condenser to return the history as is
-    agent.condenser = Mock()
-    agent.condenser.condensed_history.return_value = View(events=mock_state.history)
+def test_step_accepts_empty_inputs_for_continuation(agent, mock_state: State):
+    agent.history = [TextInput(text='Prior request')]
+    agent.llm.completion.return_value = QueryResult(output_text='Continuation')
+    action = agent.step(mock_state)
+    assert action.content == 'Continuation'
+    assert agent.llm.completion.call_args.kwargs['input'] == []
 
-    with pytest.raises(ValueError, match='Initial user message not found'):
-        agent.step(mock_state)
+
+@pytest.mark.parametrize('agent_kind', ['readonly', 'loc'])
+def test_specialized_parser_rejects_malformed_tool_arguments(agent_kind):
+    from openhands.agenthub.loc_agent.function_calling import (
+        response_to_actions as loc_response,
+    )
+
+    parse = readonly_response_to_actions if agent_kind == 'readonly' else loc_response
+    response = QueryResult(
+        tool_calls=[ToolCall(id='bad-json', name='finish', args='not json')]
+    )
+    with pytest.raises(FunctionCallValidationError):
+        parse(response)
+
+
+@pytest.mark.parametrize('agent_kind', ['readonly', 'loc'])
+def test_specialized_parser_preserves_finish_and_response_metadata(agent_kind):
+    from openhands.agenthub.loc_agent.function_calling import (
+        response_to_actions as loc_response,
+    )
+    from openhands.events.action import AgentFinishAction
+
+    parse = readonly_response_to_actions if agent_kind == 'readonly' else loc_response
+    response = QueryResult(
+        tool_calls=[ToolCall(id='done', name='finish', args='{"message":"Finished"}')]
+    )
+    response.extras.response_id = 'provider-response'
+    action = parse(response)[0]
+    assert isinstance(action, AgentFinishAction)
+    assert action.final_thought == 'Finished'
+    assert action.response_id == 'provider-response'
+    assert action.tool_call_metadata.tool_call_id == 'done'

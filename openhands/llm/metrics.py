@@ -282,9 +282,9 @@ class Metrics:
                     + other._usage_accounting.missing_cost_responses
                 ),
             }
-            if isinstance(
-                self._usage_accounting, UsageAccountingV2
-            ) and isinstance(other._usage_accounting, UsageAccountingV2):
+            if isinstance(self._usage_accounting, UsageAccountingV2) and isinstance(
+                other._usage_accounting, UsageAccountingV2
+            ):
                 self._usage_accounting = UsageAccountingV2(
                     schema_version=2,
                     response_count=(
@@ -318,9 +318,13 @@ class Metrics:
         self.response_latencies += other.response_latencies
         self._accumulated_token_usage = current_usage + other_usage
         if not has_usage:
-            self._accumulated_token_usage.reasoning_tokens = other_usage.reasoning_tokens
+            self._accumulated_token_usage.reasoning_tokens = (
+                other_usage.reasoning_tokens
+            )
         elif not other_has_usage:
-            self._accumulated_token_usage.reasoning_tokens = current_usage.reasoning_tokens
+            self._accumulated_token_usage.reasoning_tokens = (
+                current_usage.reasoning_tokens
+            )
 
     def get(self) -> dict:
         """Return the metrics in a dictionary."""
@@ -382,9 +386,9 @@ class Metrics:
                     - baseline._usage_accounting.missing_cost_responses
                 ),
             }
-            if isinstance(
-                self._usage_accounting, UsageAccountingV2
-            ) and isinstance(baseline._usage_accounting, UsageAccountingV2):
+            if isinstance(self._usage_accounting, UsageAccountingV2) and isinstance(
+                baseline._usage_accounting, UsageAccountingV2
+            ):
                 result._usage_accounting = UsageAccountingV2(
                     schema_version=2,
                     response_count=(

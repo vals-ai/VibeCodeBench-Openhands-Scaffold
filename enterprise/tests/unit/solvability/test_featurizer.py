@@ -1,5 +1,7 @@
 import pytest
 from integrations.solvability.models.featurizer import Feature, FeatureEmbedding
+from model_library.base import QueryResult, ToolCall
+from model_library.base.output.result import QueryResultMetadata
 
 
 def test_feature_to_tool_description_field():
@@ -29,29 +31,6 @@ def test_feature_embedding_coefficients(feature_embedding):
 
     # Non-existent features should not have a coefficient.
     assert feature_embedding.coefficient('non_existent') is None
-
-
-def test_featurizer_system_message(featurizer):
-    """Test system_message method."""
-    message = featurizer.system_message()
-    assert message['role'] == 'system'
-    assert message['content'] == 'Test system prompt'
-
-
-def test_featurizer_user_message(featurizer):
-    """Test user_message method."""
-    # With cache
-    message = featurizer.user_message('Test issue', set_cache=True)
-    assert message['role'] == 'user'
-    assert message['content'] == 'Test message prefix: Test issue'
-    assert 'cache_control' in message
-    assert message['cache_control']['type'] == 'ephemeral'
-
-    # Without cache
-    message = featurizer.user_message('Test issue', set_cache=False)
-    assert message['role'] == 'user'
-    assert message['content'] == 'Test message prefix: Test issue'
-    assert 'cache_control' not in message
 
 
 def test_featurizer_tool_choice(featurizer):
@@ -136,18 +115,22 @@ def test_featurizer_embed_batch_thread_safety(featurizer, mock_llm_config, monke
 
     # Create unique responses for each issue to verify ordering
     def create_mock_response(issue_index):
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.tool_calls = [MagicMock()]
-        # Each issue gets a unique feature pattern based on its index
-        mock_response.choices[0].message.tool_calls[0].function.arguments = (
-            f'{{"feature1": {str(issue_index % 2 == 0).lower()}, '
-            f'"feature2": {str(issue_index % 3 == 0).lower()}, '
-            f'"feature3": {str(issue_index % 5 == 0).lower()}}}'
+        return QueryResult(
+            tool_calls=[
+                ToolCall(
+                    id=str(issue_index),
+                    name='call_featurizer',
+                    args={
+                        'feature1': issue_index % 2 == 0,
+                        'feature2': issue_index % 3 == 0,
+                        'feature3': issue_index % 5 == 0,
+                    },
+                )
+            ],
+            metadata=QueryResultMetadata(
+                in_tokens=10 + issue_index, out_tokens=5 + issue_index
+            ),
         )
-        mock_response.usage.prompt_tokens = 10 + issue_index
-        mock_response.usage.completion_tokens = 5 + issue_index
-        return mock_response
 
     # Track call order and add delays to simulate varying processing times
     call_count = 0
@@ -156,8 +139,7 @@ def test_featurizer_embed_batch_thread_safety(featurizer, mock_llm_config, monke
     def mock_completion(*args, **kwargs):
         nonlocal call_count
         # Extract issue index from the message content
-        messages = kwargs.get('messages', args[0] if args else [])
-        message_content = messages[1]['content']
+        message_content = kwargs['input'][1].text
         issue_index = int(message_content.split('Issue ')[-1])
         call_order.append(issue_index)
 
@@ -214,8 +196,7 @@ def test_featurizer_embed_batch_exception_handling(
 
     def mock_completion(*args, **kwargs):
         # Extract issue index from the message content
-        messages = kwargs.get('messages', args[0] if args else [])
-        message_content = messages[1]['content']
+        message_content = kwargs['input'][1].text
         issue_index = int(message_content.split('Issue ')[-1])
 
         # Make some issues fail
@@ -223,15 +204,20 @@ def test_featurizer_embed_batch_exception_handling(
             raise ValueError(f'Simulated error for issue {issue_index}')
 
         # Return normal response for others
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.tool_calls = [MagicMock()]
-        mock_response.choices[0].message.tool_calls[
-            0
-        ].function.arguments = '{"feature1": true, "feature2": false, "feature3": true}'
-        mock_response.usage.prompt_tokens = 10
-        mock_response.usage.completion_tokens = 5
-        return mock_response
+        return QueryResult(
+            tool_calls=[
+                ToolCall(
+                    id='features',
+                    name='call_featurizer',
+                    args={
+                        'feature1': True,
+                        'feature2': False,
+                        'feature3': True,
+                    },
+                )
+            ],
+            metadata=QueryResultMetadata(in_tokens=10, out_tokens=5),
+        )
 
     def mock_llm_class(*args, **kwargs):
         mock_llm_instance = MagicMock()

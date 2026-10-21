@@ -1,1 +1,2 @@
 model-library==0.1.30
+mcp==1.22.0

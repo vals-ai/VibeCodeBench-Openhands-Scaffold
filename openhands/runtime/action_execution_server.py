@@ -508,7 +508,9 @@ class ActionExecutor:
         except UnicodeDecodeError:
             return ErrorObservation(f'File could not be decoded as utf-8: {filepath}.')
         except IsADirectoryError:
-            return FileReadObservation(path=filepath, content=list_directory(Path(filepath)))
+            return FileReadObservation(
+                path=filepath, content=list_directory(Path(filepath))
+            )
 
         code_view = ''.join(lines)
         return FileReadObservation(path=filepath, content=code_view)
