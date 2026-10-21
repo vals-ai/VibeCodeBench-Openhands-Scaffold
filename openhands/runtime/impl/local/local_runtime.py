@@ -741,6 +741,7 @@ def _create_server(
         app_config=config,
         python_prefix=[],
         python_executable=sys.executable,
+        start_docker=sys.platform != 'win32',
         override_user_id=user_id,
         override_username=username,
     )
