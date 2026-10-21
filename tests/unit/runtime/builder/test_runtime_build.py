@@ -104,12 +104,16 @@ def test_public_build_excludes_local_model_proxy(tmp_path, monkeypatch):
         (project / name).mkdir(parents=True)
     (project / 'model-proxy' / 'private.txt').write_text('private source')
     files = [
-        'pyproject.toml', 'poetry.lock',
-        'requirements-model-library.txt', 'requirements-overrides.txt',
+        'pyproject.toml',
+        'poetry.lock',
+        'requirements-model-library.txt',
+        'requirements-overrides.txt',
     ]
     for name in files:
         (project / name).write_text(name)
-    monkeypatch.setattr(openhands, '__file__', str(project / 'openhands' / '__init__.py'))
+    monkeypatch.setattr(
+        openhands, '__file__', str(project / 'openhands' / '__init__.py')
+    )
     output = tmp_path / 'build'
 
     prep_build_folder(output, DEFAULT_BASE_IMAGE, BuildFromImageType.SCRATCH, None)
@@ -131,7 +135,9 @@ def test_public_build_excludes_local_model_proxy(tmp_path, monkeypatch):
         'requirements-overrides.txt',
     ],
 )
-def test_dependency_image_hash_tracks_install_inputs(tmp_path, monkeypatch, changed_file):
+def test_dependency_image_hash_tracks_install_inputs(
+    tmp_path, monkeypatch, changed_file
+):
     source = tmp_path / 'openhands'
     source.mkdir()
     monkeypatch.setattr(openhands, '__file__', str(source / '__init__.py'))

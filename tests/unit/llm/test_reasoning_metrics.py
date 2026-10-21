@@ -33,7 +33,7 @@ def test_token_usage_preserves_unreported_and_reported_zero_reasoning():
 
 def test_token_usage_unpickles_legacy_metrics_without_reasoning():
     legacy = TokenUsage(completion_tokens=4)
-    del legacy.__dict__["reasoning_tokens"]
+    del legacy.__dict__['reasoning_tokens']
 
     restored = pickle.loads(pickle.dumps(legacy))
 
@@ -52,9 +52,9 @@ def test_metrics_unpickles_without_usage_accounting():
 
 def test_metrics_merge_preserves_optional_reasoning():
     reported = Metrics()
-    reported.add_token_usage(1, 4, 0, 0, 0, "", reasoning_tokens=3)
+    reported.add_token_usage(1, 4, 0, 0, 0, '', reasoning_tokens=3)
     unreported = Metrics()
-    unreported.add_token_usage(2, 5, 0, 0, 0, "", reasoning_tokens=None)
+    unreported.add_token_usage(2, 5, 0, 0, 0, '', reasoning_tokens=None)
 
     assert reported.accumulated_token_usage.reasoning_tokens == 3
     reported.merge(Metrics())
@@ -70,15 +70,15 @@ def test_metrics_merge_preserves_optional_reasoning():
 
 def test_zero_token_unreported_usage_remains_unknown():
     unreported = Metrics()
-    unreported.add_token_usage(0, 0, 0, 0, 0, "", reasoning_tokens=None)
+    unreported.add_token_usage(0, 0, 0, 0, 0, '', reasoning_tokens=None)
     assert unreported.get()['usage_accounting']['response_count'] == 1
 
     sequential = unreported.copy()
-    sequential.add_token_usage(1, 1, 0, 0, 0, "", reasoning_tokens=5)
+    sequential.add_token_usage(1, 1, 0, 0, 0, '', reasoning_tokens=5)
     assert sequential.accumulated_token_usage.reasoning_tokens is None
 
     reported = Metrics()
-    reported.add_token_usage(1, 1, 0, 0, 0, "", reasoning_tokens=5)
+    reported.add_token_usage(1, 1, 0, 0, 0, '', reasoning_tokens=5)
 
     unreported.merge(reported)
 
@@ -109,18 +109,18 @@ def test_metrics_merge_preserves_accumulated_only_reasoning():
 
 def test_metrics_diff_preserves_reasoning_reporting():
     metrics = Metrics()
-    metrics.add_token_usage(1, 2, 0, 0, 0, "", reasoning_tokens=3)
+    metrics.add_token_usage(1, 2, 0, 0, 0, '', reasoning_tokens=3)
     baseline = metrics.copy()
 
-    metrics.add_token_usage(1, 2, 0, 0, 0, "", reasoning_tokens=None)
+    metrics.add_token_usage(1, 2, 0, 0, 0, '', reasoning_tokens=None)
     assert metrics.diff(baseline).accumulated_token_usage.reasoning_tokens is None
 
     baseline = metrics.copy()
-    metrics.add_token_usage(1, 2, 0, 0, 0, "", reasoning_tokens=0)
+    metrics.add_token_usage(1, 2, 0, 0, 0, '', reasoning_tokens=0)
     assert metrics.diff(baseline).accumulated_token_usage.reasoning_tokens == 0
 
     baseline = metrics.copy()
-    metrics.add_token_usage(1, 2, 0, 0, 0, "", reasoning_tokens=3)
+    metrics.add_token_usage(1, 2, 0, 0, 0, '', reasoning_tokens=3)
     diff = metrics.diff(baseline).accumulated_token_usage
     assert diff.reasoning_tokens == 3
     assert diff.total_output_tokens == 5

@@ -139,9 +139,10 @@ def test_v1_usage_accounting_remains_readable():
 
     round_tripped = event_to_dict(event_from_dict(serialized))
 
-    assert round_tripped['llm_metrics']['usage_accounting'] == serialized[
-        'llm_metrics'
-    ]['usage_accounting']
+    assert (
+        round_tripped['llm_metrics']['usage_accounting']
+        == serialized['llm_metrics']['usage_accounting']
+    )
 
 
 def test_unknown_usage_accounting_version_fails():

@@ -381,7 +381,10 @@ class LocalRuntime(ActionExecutionClient):
                         workspace_mount_path=self.config.workspace_mount_path_in_sandbox,
                     )
 
-                    self.log('info', f'Waiting for server to become ready at {self.api_url}...')
+                    self.log(
+                        'info',
+                        f'Waiting for server to become ready at {self.api_url}...',
+                    )
                     self.set_runtime_status(RuntimeStatus.STARTING_RUNTIME)
 
                     try:
@@ -396,7 +399,9 @@ class LocalRuntime(ActionExecutionClient):
                         )
                         self._cleanup_failed_startup_server()
                         if attempt < LOCAL_RUNTIME_STARTUP_MAX_ATTEMPTS:
-                            await asyncio.sleep(LOCAL_RUNTIME_STARTUP_RETRY_DELAY_SECONDS)
+                            await asyncio.sleep(
+                                LOCAL_RUNTIME_STARTUP_RETRY_DELAY_SECONDS
+                            )
 
                 if startup_error is not None:
                     raise startup_error

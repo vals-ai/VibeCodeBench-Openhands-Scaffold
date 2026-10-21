@@ -250,7 +250,9 @@ class JupyterPlugin(Plugin):
 
         try:
             _obs = await asyncio.wait_for(
-                self.run(IPythonRunCellAction(code='import sys; print(sys.executable)')),
+                self.run(
+                    IPythonRunCellAction(code='import sys; print(sys.executable)')
+                ),
                 timeout=self.initial_ipython_handshake_timeout_seconds,
             )
         except Exception as exc:

@@ -1,5 +1,4 @@
 import copy
-import math
 import os
 from typing import Any, Callable, cast, override
 
@@ -22,7 +21,7 @@ from openhands.llm.utils import (
 
 _persistent_loop: PersistentEventLoopRunner | None = None
 
-MESSAGE_SEPARATOR = "\n\n----------\n\n"
+MESSAGE_SEPARATOR = '\n\n----------\n\n'
 
 
 def _is_model_library_max_context_window_error(error: Exception) -> bool:
@@ -40,22 +39,22 @@ def _is_model_library_max_context_window_error(error: Exception) -> bool:
 class DebugMixin:
     def _truncate(self, string: str, max_length: int = 1000) -> str:
         if len(string) > max_length:
-            return string[: max_length // 2] + "..." + string[-max_length // 2 :]
+            return string[: max_length // 2] + '...' + string[-max_length // 2 :]
 
         return string
 
     def pretty_print(self, obj: Any) -> None:
-        debug_message = ""
+        debug_message = ''
         if isinstance(obj, list):
             for item in obj:
-                debug_message += f"{self._truncate(str(item))}\n"
+                debug_message += f'{self._truncate(str(item))}\n'
         elif isinstance(obj, dict):
             for key, value in obj.items():
-                debug_message += f"{key}: {self._truncate(str(value))}\n"
+                debug_message += f'{key}: {self._truncate(str(value))}\n'
         elif isinstance(obj, str):
-            debug_message += f"{self._truncate(obj)}\n"
+            debug_message += f'{self._truncate(obj)}\n'
         else:
-            debug_message += f"{self._truncate(str(obj))}\n"
+            debug_message += f'{self._truncate(str(obj))}\n'
 
         if debug_message:
             logger.debug(debug_message)
@@ -81,7 +80,7 @@ class LLM(DebugMixin):
         if self.config.log_completions:
             if not self.config.log_completions_folder:
                 raise RuntimeError(
-                    "log_completions_folder is required when log_completions is enabled"
+                    'log_completions_folder is required when log_completions is enabled'
                 )
 
             os.makedirs(self.config.log_completions_folder, exist_ok=True)
@@ -98,15 +97,16 @@ class LLM(DebugMixin):
         assert self.config.timeout is not None
         model = _persistent_loop.run(_init_model(), timeout=self.config.timeout)
 
-        self.pretty_print(f"[Model] {model}")
+        self.pretty_print(f'[Model] {model}')
 
         self.kwargs: dict[str, Any] = {}
         self.model: ValsLLM = model
 
         def wrapper(*args: Any, **kwargs: Any) -> QueryResult:
-            input = cast(list[InputItem], kwargs.pop("input", []))
-            history = cast(list[InputItem], kwargs.pop("history", []))
-            tools = cast(list[ToolDefinition], kwargs.pop("tools", []))
+            input = cast(list[InputItem], kwargs.pop('input', []))
+            history = cast(list[InputItem], kwargs.pop('history', []))
+            tools = cast(list[ToolDefinition], kwargs.pop('tools', []))
+
             async def _query_llm() -> QueryResult:
                 query_result: QueryResult = await self.model.query(
                     input=input,
@@ -128,7 +128,7 @@ class LLM(DebugMixin):
 
             metadata = query_result.metadata
 
-            self.metrics.add_response_latency(metadata.duration_seconds or 0, "")
+            self.metrics.add_response_latency(metadata.duration_seconds or 0, '')
 
             cost = metadata.cost.total if metadata.cost else None
             turn_cost = f'${cost:.6f}' if cost is not None else 'unknown'
@@ -145,11 +145,11 @@ class LLM(DebugMixin):
                 cache_read_tokens=metadata.cache_read_tokens or 0,
                 cache_write_tokens=metadata.cache_write_tokens or 0,
                 context_window=0,
-                response_id="",
+                response_id='',
             )
 
             self.pretty_print(
-                "[Total Cost] ${:.6f}\n[Total Usage] {}".format(
+                '[Total Cost] ${:.6f}\n[Total Usage] {}'.format(
                     self.metrics.accumulated_cost,
                     self.metrics.accumulated_token_usage,
                 )
@@ -170,16 +170,15 @@ class LLM(DebugMixin):
     def _supports_vision(self) -> bool:
         return self.model.supports_images
 
-
     def is_function_calling_active(self) -> bool:
         return self.model.supports_tools
 
     def get_token_count(self, history: list[InputItem]) -> int:
-        raise NotImplementedError("Not implemented")
+        raise NotImplementedError('Not implemented')
 
     @override
     def __str__(self) -> str:
-        return f"LLM(model={self.config.model} \
+        return f'LLM(model={self.config.model} \
         provider={self.model.provider} \
         max_tokens={self.model.max_tokens} \
         reasoning={self.config.reasoning_effort} \
@@ -190,7 +189,7 @@ class LLM(DebugMixin):
         supports_batch={self.model.supports_batch} \
         supports_temperature={self.model.supports_temperature} \
         supports_tools={self.model.supports_tools} \
-        )"
+        )'
 
     @override
     def __repr__(self) -> str:
