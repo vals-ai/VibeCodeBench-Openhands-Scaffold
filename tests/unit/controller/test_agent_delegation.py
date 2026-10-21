@@ -37,7 +37,15 @@ from openhands.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture
-def llm_registry():
+def llm_registry(monkeypatch):
+    def create_llm(service_id, config, retry_listener=None):
+        llm = MagicMock(spec=LLM)
+        llm.service_id = service_id
+        llm.config = config
+        llm.metrics = Metrics(model_name=config.model)
+        return llm
+
+    monkeypatch.setattr('openhands.llm.llm_registry.LLM', create_llm)
     config = OpenHandsConfig()
     return LLMRegistry(config=config)
 
@@ -75,6 +83,7 @@ def mock_parent_agent(llm_registry):
     """Creates a mock parent agent for testing delegation."""
     agent = MagicMock(spec=Agent)
     agent.name = 'ParentAgent'
+    agent.pending_tool_call_errors = []
     agent.llm = MagicMock(spec=LLM)
     agent.llm.service_id = 'main_agent'
     agent.llm.metrics = Metrics()
@@ -96,6 +105,7 @@ def mock_child_agent(llm_registry):
     """Creates a mock child agent for testing delegation."""
     agent = MagicMock(spec=Agent)
     agent.name = 'ChildAgent'
+    agent.pending_tool_call_errors = []
     agent.llm = MagicMock(spec=LLM)
     agent.llm.service_id = 'main_agent'
     agent.llm.metrics = Metrics()
@@ -128,7 +138,11 @@ def create_mock_agent_factory(mock_child_agent, llm_registry):
 
 @pytest.mark.asyncio
 async def test_delegation_flow(
-    mock_parent_agent, mock_child_agent, mock_event_stream, connected_registry_and_stats
+    mock_parent_agent,
+    mock_child_agent,
+    mock_event_stream,
+    connected_registry_and_stats,
+    monkeypatch,
 ):
     """
     Test that when the parent agent delegates to a child
@@ -139,8 +153,10 @@ async def test_delegation_flow(
     llm_registry, conversation_stats = connected_registry_and_stats
 
     # Mock the agent class resolution so that AgentController can instantiate mock_child_agent
-    Agent.get_cls = Mock(
-        return_value=create_mock_agent_factory(mock_child_agent, llm_registry)
+    monkeypatch.setattr(
+        Agent,
+        'get_cls',
+        Mock(return_value=create_mock_agent_factory(mock_child_agent, llm_registry)),
     )
 
     step_count = 0
@@ -162,7 +178,7 @@ async def test_delegation_flow(
     parent_metrics.accumulated_cost = 2
     # Create parent controller
     parent_state = State(
-        inputs={},
+        inputs=[],
         metrics=parent_metrics,
         budget_flag=BudgetControlFlag(
             current_value=2, limit_increase_amount=10, max_value=10
@@ -294,13 +310,15 @@ async def test_delegation_flow(
     ],
 )
 async def test_delegate_step_different_states(
-    mock_parent_agent, mock_event_stream, delegate_state, connected_registry_and_stats
+    mock_parent_agent, delegate_state, connected_registry_and_stats
 ):
     """Ensure that delegate is closed or remains open based on the delegate's state."""
+    mock_event_stream = MagicMock(spec=EventStream)
+    mock_event_stream.get_latest_event_id.return_value = 0
     llm_registry, conversation_stats = connected_registry_and_stats
 
     # Create a state with iteration_flag.max_value set to 10
-    state = State(inputs={})
+    state = State(inputs=[])
     state.iteration_flag.max_value = 10
     controller = AgentController(
         agent=mock_parent_agent,
@@ -319,13 +337,14 @@ async def test_delegate_step_different_states(
     mock_delegate.state.iteration_flag = MagicMock()
     mock_delegate.state.iteration_flag.current_value = 5
     mock_delegate.state.outputs = {'result': 'test'}
+    mock_delegate.state.last_error = ''
     mock_delegate.agent.name = 'TestDelegate'
 
     mock_delegate.get_agent_state = Mock(return_value=delegate_state)
     mock_delegate._step = AsyncMock()
     mock_delegate.close = AsyncMock()
 
-    async def call_on_event_with_new_loop():
+    def call_on_event_with_new_loop():
         """In this thread, create and set a fresh event loop, so that the run_until_complete()
         calls inside controller.on_event(...) find a valid loop.
         """
@@ -361,7 +380,11 @@ async def test_delegate_step_different_states(
 
 @pytest.mark.asyncio
 async def test_delegate_hits_global_limits(
-    mock_child_agent, mock_event_stream, mock_parent_agent, connected_registry_and_stats
+    mock_child_agent,
+    mock_event_stream,
+    mock_parent_agent,
+    connected_registry_and_stats,
+    monkeypatch,
 ):
     """
     Global limits from control flags should apply to delegates
@@ -369,8 +392,10 @@ async def test_delegate_hits_global_limits(
     llm_registry, conversation_stats = connected_registry_and_stats
 
     # Mock the agent class resolution so that AgentController can instantiate mock_child_agent
-    Agent.get_cls = Mock(
-        return_value=create_mock_agent_factory(mock_child_agent, llm_registry)
+    monkeypatch.setattr(
+        Agent,
+        'get_cls',
+        Mock(return_value=create_mock_agent_factory(mock_child_agent, llm_registry)),
     )
 
     # Set up the parent agent's LLM with initial cost and register it in the registry
@@ -383,7 +408,7 @@ async def test_delegate_hits_global_limits(
     parent_metrics.accumulated_cost = 2
     # Create parent controller
     parent_state = State(
-        inputs={},
+        inputs=[],
         metrics=parent_metrics,
         budget_flag=BudgetControlFlag(
             current_value=2, limit_increase_amount=10, max_value=10

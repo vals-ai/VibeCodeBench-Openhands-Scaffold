@@ -186,8 +186,6 @@ class AgentController:
             confirmation_mode=confirmation_mode,
         )
 
-        self.state = self.state_tracker.state  # TODO: share between manager and controller for backward compatability; we should ideally move all state related logic to the state manager
-
         # Attachments (e.g. browser screenshots) held back until every tool
         # call from the current assistant turn has produced its result, so
         # tool results stay contiguous after their assistant message.
@@ -749,7 +747,7 @@ class AgentController:
         state = State(
             session_id=self.id.removesuffix('-delegate'),
             user_id=self.user_id,
-            inputs=action.inputs or {},
+            inputs=[],
             iteration_flag=self.state.iteration_flag,
             budget_flag=self.state.budget_flag,
             delegate_level=self.state.delegate_level + 1,
@@ -1084,6 +1082,8 @@ class AgentController:
             max_budget_per_task,
             confirmation_mode,
         )
+        self.state = self.state_tracker.state
+        self.state.bind_event_stream(self.event_stream)
 
     def get_trajectory(self, include_screenshots: bool = False) -> list[dict[str, Any]]:
         # state history could be partially hidden/truncated before controller is closed

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from jinja2 import Environment, FileSystemLoader
 from server.constants import WEB_HOST
@@ -198,17 +198,23 @@ def get_summary_for_agent_state(
 def get_final_agent_observation(
     event_store: EventStoreABC,
 ) -> list[AgentStateChangedObservation]:
-    return event_store.get_matching_events(
-        source=EventSource.ENVIRONMENT,
-        event_types=(AgentStateChangedObservation,),
-        limit=1,
-        reverse=True,
+    return cast(
+        list[AgentStateChangedObservation],
+        event_store.get_matching_events(
+            source=EventSource.ENVIRONMENT,
+            event_types=(AgentStateChangedObservation,),
+            limit=1,
+            reverse=True,
+        ),
     )
 
 
 def get_last_user_msg(event_store: EventStoreABC) -> list[MessageAction]:
-    return event_store.get_matching_events(
-        source=EventSource.USER, event_types=(MessageAction,), limit=1, reverse='true'
+    return cast(
+        list[MessageAction],
+        event_store.get_matching_events(
+            source=EventSource.USER, event_types=(MessageAction,), limit=1, reverse=True
+        ),
     )
 
 
@@ -221,12 +227,15 @@ def extract_summary_from_event_store(
     conversation_link = CONVERSATION_URL.format(conversation_id)
     summary_instruction = get_summary_instruction()
 
-    instruction_event: list[MessageAction] = event_store.get_matching_events(
-        query=json.dumps(summary_instruction),
-        source=EventSource.USER,
-        event_types=(MessageAction,),
-        limit=1,
-        reverse=True,
+    instruction_event = cast(
+        list[MessageAction],
+        event_store.get_matching_events(
+            query=json.dumps(summary_instruction),
+            source=EventSource.USER,
+            event_types=(MessageAction,),
+            limit=1,
+            reverse=True,
+        ),
     )
 
     final_agent_observation = get_final_agent_observation(event_store)
@@ -242,14 +251,15 @@ def extract_summary_from_event_store(
 
     event_id: int = instruction_event[0].id
 
-    agent_messages: list[MessageAction | AgentFinishAction] = (
+    agent_messages = cast(
+        list[MessageAction | AgentFinishAction],
         event_store.get_matching_events(
             start_id=event_id,
             source=EventSource.AGENT,
             event_types=(MessageAction, AgentFinishAction),
             reverse=True,
             limit=1,
-        )
+        ),
     )
 
     if len(agent_messages) == 0:

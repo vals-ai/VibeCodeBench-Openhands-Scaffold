@@ -3,7 +3,7 @@ import shutil
 from unittest.mock import MagicMock, Mock
 
 import pytest
-from litellm import ChatCompletionMessageToolCall
+from model_library.base import QueryResult, ToolCall
 
 from openhands.controller.state.state import State
 from openhands.core.config.agent_config import AgentConfig
@@ -242,14 +242,9 @@ def test_ensure_initial_user_message_different_user_msg_at_index_1_and_orphaned_
 
     # Create an orphaned observation (no matching action/tool call request will exist)
     # Use a dictionary that mimics ModelResponse structure to satisfy Pydantic
-    mock_response = {
-        'id': 'mock_response_id',
-        'choices': [{'message': {'content': None, 'tool_calls': []}}],
-        'created': 0,
-        'model': '',
-        'object': '',
-        'usage': {'completion_tokens': 0, 'prompt_tokens': 0, 'total_tokens': 0},
-    }
+    mock_response = QueryResult(
+        output_text=None, extras={'response_id': 'mock_response_id'}, tool_calls=[]
+    )
     orphaned_obs = CmdOutputObservation(
         command='orphan_cmd',
         content='Orphaned output',
@@ -536,11 +531,9 @@ def test_process_events_with_empty_environment_info(conversation_memory):
 
 
 def test_process_events_with_function_calling_observation(conversation_memory):
-    mock_response = {
-        'id': 'mock_id',
-        'total_calls_in_response': 1,
-        'choices': [{'message': {'content': 'Task completed'}}],
-    }
+    mock_response = QueryResult(
+        output_text='Task completed', extras={'response_id': 'mock_id'}, tool_calls=[]
+    )
     obs = CmdOutputObservation(
         command='echo hello',
         content='Command output',
@@ -622,11 +615,9 @@ def test_process_events_with_user_cmd_action(conversation_memory):
 def test_process_events_with_agent_finish_action_with_tool_metadata(
     conversation_memory,
 ):
-    mock_response = {
-        'id': 'mock_id',
-        'total_calls_in_response': 1,
-        'choices': [{'message': {'content': 'Task completed'}}],
-    }
+    mock_response = QueryResult(
+        output_text='Task completed', extras={'response_id': 'mock_id'}, tool_calls=[]
+    )
 
     action = AgentFinishAction(thought='Initial thought')
     action._source = EventSource.AGENT
@@ -1210,17 +1201,11 @@ class TestFilterUnmatchedToolCalls:
             Message(
                 role='assistant',
                 content=[],
-                tool_calls=[
-                    ChatCompletionMessageToolCall(
-                        id='call_1',
-                        type='function',
-                        function={'name': 'get_weather', 'arguments': ''},
-                    )
-                ],
+                tool_calls=[ToolCall(id='call_1', name='get_weather', args='')],
             ),
             Message(
                 role='tool',
-                tool_call_id='call_1',
+                id='call_1',
                 content=[TextContent(text='Sunny, 75°F')],
             ),
             Message(role='assistant', content=[TextContent(text="It's sunny today.")]),
@@ -1236,7 +1221,7 @@ class TestFilterUnmatchedToolCalls:
             Message(role='user', content=[TextContent(text='Query')]),
             Message(
                 role='tool',
-                tool_call_id='missing_call',
+                id='missing_call',
                 content=[TextContent(text='Response')],
             ),
             Message(role='assistant', content=[TextContent(text='Answer')]),
@@ -1257,11 +1242,7 @@ class TestFilterUnmatchedToolCalls:
                 role='assistant',
                 content=[],
                 tool_calls=[
-                    ChatCompletionMessageToolCall(
-                        id='unmatched_call',
-                        type='function',
-                        function={'name': 'some_function', 'arguments': ''},
-                    )
+                    ToolCall(id='unmatched_call', name='some_function', args='')
                 ],
             ),
             Message(role='assistant', content=[TextContent(text='Answer')]),
@@ -1283,21 +1264,13 @@ class TestFilterUnmatchedToolCalls:
                 role='assistant',
                 content=[],
                 tool_calls=[
-                    ChatCompletionMessageToolCall(
-                        id='matched_call',
-                        type='function',
-                        function={'name': 'function1', 'arguments': ''},
-                    ),
-                    ChatCompletionMessageToolCall(
-                        id='unmatched_call',
-                        type='function',
-                        function={'name': 'function2', 'arguments': ''},
-                    ),
+                    ToolCall(id='matched_call', name='function1', args=''),
+                    ToolCall(id='unmatched_call', name='function2', args=''),
                 ],
             ),
             Message(
                 role='tool',
-                tool_call_id='matched_call',
+                id='matched_call',
                 content=[TextContent(text='Data')],
             ),
             Message(role='assistant', content=[TextContent(text='Result')]),
@@ -1309,17 +1282,11 @@ class TestFilterUnmatchedToolCalls:
             Message(
                 role='assistant',
                 content=[],
-                tool_calls=[
-                    ChatCompletionMessageToolCall(
-                        id='matched_call',
-                        type='function',
-                        function={'name': 'function1', 'arguments': ''},
-                    )
-                ],
+                tool_calls=[ToolCall(id='matched_call', name='function1', args='')],
             ),
             Message(
                 role='tool',
-                tool_call_id='matched_call',
+                id='matched_call',
                 content=[TextContent(text='Data')],
             ),
             Message(role='assistant', content=[TextContent(text='Result')]),
@@ -1362,31 +1329,11 @@ def _create_mock_tool_call_metadata(
     tool_call_id: str, function_name: str, response_id: str = 'mock_response_id'
 ) -> ToolCallMetadata:
     # Use a dictionary that mimics ModelResponse structure to satisfy Pydantic
-    mock_response = {
-        'id': response_id,
-        'choices': [
-            {
-                'message': {
-                    'role': 'assistant',
-                    'content': None,  # Content is None for tool calls
-                    'tool_calls': [
-                        {
-                            'id': tool_call_id,
-                            'type': 'function',
-                            'function': {
-                                'name': function_name,
-                                'arguments': '{}',
-                            },  # Args don't matter for this test
-                        }
-                    ],
-                }
-            }
-        ],
-        'created': 0,
-        'model': 'mock_model',
-        'object': 'chat.completion',
-        'usage': {'completion_tokens': 0, 'prompt_tokens': 0, 'total_tokens': 0},
-    }
+    mock_response = QueryResult(
+        output_text=None,
+        extras={'response_id': response_id},
+        tool_calls=[ToolCall(id=tool_call_id, name=function_name, args='{}')],
+    )
     return ToolCallMetadata(
         tool_call_id=tool_call_id,
         function_name=function_name,
@@ -1460,7 +1407,7 @@ def test_process_events_partial_history(conversation_memory):
     assert len(messages_full[3].tool_calls) == 1
     assert messages_full[3].tool_calls[0].id == 'call_ls_1'
     assert messages_full[4].role == 'tool'
-    assert messages_full[4].tool_call_id == 'call_ls_1'
+    assert messages_full[4].id == 'call_ls_1'
     assert 'file1.txt' in messages_full[4].content[0].text
 
     # --- Scenario 2: Partial History (Action + Observation) ---
@@ -1491,7 +1438,7 @@ def test_process_events_partial_history(conversation_memory):
     assert len(messages_partial_action_obs[2].tool_calls) == 1
     assert messages_partial_action_obs[2].tool_calls[0].id == 'call_ls_1'
     assert messages_partial_action_obs[3].role == 'tool'
-    assert messages_partial_action_obs[3].tool_call_id == 'call_ls_1'
+    assert messages_partial_action_obs[3].id == 'call_ls_1'
     assert 'file1.txt' in messages_partial_action_obs[3].content[0].text
 
     # --- Scenario 3: Partial History (Observation Only) ---

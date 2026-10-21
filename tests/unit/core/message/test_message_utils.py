@@ -33,7 +33,7 @@ def test_get_token_usage_for_event():
     mock_tool_call_metadata = ToolCallMetadata(
         tool_call_id='test-tool-call',
         function_name='fake_function',
-        model_response={'id': 'test-response-id'},
+        model_response={'extras': {'response_id': 'test-response-id'}},
         total_calls_in_response=1,
     )
     event._tool_call_metadata = (
@@ -47,7 +47,7 @@ def test_get_token_usage_for_event():
     assert found.response_id == 'test-response-id'
 
     # If we change the event's response ID, we won't find anything
-    mock_tool_call_metadata.model_response.id = 'some-other-id'
+    mock_tool_call_metadata.model_response.extras.response_id = 'some-other-id'
     found2 = get_token_usage_for_event(event, metrics)
     assert found2 is None
 
@@ -91,14 +91,14 @@ def test_get_token_usage_for_event_id():
             e._tool_call_metadata = ToolCallMetadata(
                 tool_call_id='tid1',
                 function_name='fn1',
-                model_response={'id': 'resp-1'},
+                model_response={'extras': {'response_id': 'resp-1'}},
                 total_calls_in_response=1,
             )
         elif i == 3:
             e._tool_call_metadata = ToolCallMetadata(
                 tool_call_id='tid2',
                 function_name='fn2',
-                model_response={'id': 'resp-2'},
+                model_response={'extras': {'response_id': 'resp-2'}},
                 total_calls_in_response=1,
             )
         events.append(e)
@@ -146,7 +146,7 @@ def test_get_token_usage_for_event_fallback():
     event._tool_call_metadata = ToolCallMetadata(
         tool_call_id='irrelevant-tool-call',
         function_name='fake_function',
-        model_response={'id': 'not-matching-any-usage'},
+        model_response={'extras': {'response_id': 'not-matching-any-usage'}},
         total_calls_in_response=1,
     )
     # But also set event.response_id to the actual usage ID
@@ -185,7 +185,7 @@ def test_get_token_usage_for_event_id_fallback():
             e._tool_call_metadata = ToolCallMetadata(
                 tool_call_id='tool-123',
                 function_name='whatever',
-                model_response={'id': 'no-such-response'},
+                model_response={'extras': {'response_id': 'no-such-response'}},
                 total_calls_in_response=1,
             )
             # But the event's top-level response_id is correct

@@ -1,9 +1,10 @@
 import asyncio
 import pickle
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from model_library.base import QueryResult
+from model_library.base.output.result import QueryResultMetadata
 
 from openhands.core.config import LLMConfig
 from openhands.llm.llm import LLM
@@ -222,7 +223,7 @@ def test_llm_records_usage_once_per_query(
     expected_reasoning,
     missing_reasoning_responses,
 ):
-    metadata = SimpleNamespace(
+    metadata = QueryResultMetadata(
         duration_seconds=None,
         cost=None,
         in_tokens=10,
@@ -233,7 +234,7 @@ def test_llm_records_usage_once_per_query(
     )
     model = MagicMock()
     model.reasoning = reasoning_model
-    model.query = AsyncMock(return_value=SimpleNamespace(metadata=metadata))
+    model.query = AsyncMock(return_value=QueryResult(metadata=metadata))
     monkeypatch.setattr('openhands.llm.llm.fetch_registry_model', lambda _: model)
     runner = MagicMock()
     runner.run.side_effect = lambda coroutine, timeout: asyncio.run(coroutine)

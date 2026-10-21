@@ -94,8 +94,9 @@ class LLM(DebugMixin):
         async def _init_model() -> ValsLLM:
             return fetch_registry_model(self.config)
 
-        assert self.config.timeout is not None
-        model = _persistent_loop.run(_init_model(), timeout=self.config.timeout)
+        timeout = self.config.timeout
+        assert timeout is not None
+        model = _persistent_loop.run(_init_model(), timeout=timeout)
 
         self.pretty_print(f'[Model] {model}')
 
@@ -106,21 +107,23 @@ class LLM(DebugMixin):
             input = cast(list[InputItem], kwargs.pop('input', []))
             history = cast(list[InputItem], kwargs.pop('history', []))
             tools = cast(list[ToolDefinition], kwargs.pop('tools', []))
+            query_kwargs = self.kwargs.copy()
+            for key in ('tool_choice', 'temperature'):
+                if key in kwargs:
+                    query_kwargs[key] = kwargs[key]
 
             async def _query_llm() -> QueryResult:
                 query_result: QueryResult = await self.model.query(
                     input=input,
                     history=history,
                     tools=tools,
-                    **self.kwargs,
+                    **query_kwargs,
                 )
 
                 return query_result
 
             try:
-                query_result = _persistent_loop.run(
-                    _query_llm(), timeout=self.config.timeout
-                )
+                query_result = _persistent_loop.run(_query_llm(), timeout=timeout)
             except Exception as error:
                 if _is_model_library_max_context_window_error(error):
                     raise LLMContextWindowExceedError(str(error)) from error
@@ -145,7 +148,7 @@ class LLM(DebugMixin):
                 cache_read_tokens=metadata.cache_read_tokens or 0,
                 cache_write_tokens=metadata.cache_write_tokens or 0,
                 context_window=0,
-                response_id='',
+                response_id=query_result.extras.response_id or '',
             )
 
             self.pretty_print(

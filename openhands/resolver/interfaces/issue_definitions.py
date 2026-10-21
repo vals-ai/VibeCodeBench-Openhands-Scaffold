@@ -4,6 +4,7 @@ import re
 from typing import Any, ClassVar
 
 import jinja2
+from model_library.base import TextInput
 
 from openhands.core.config import LLMConfig
 from openhands.events.event import Event
@@ -172,9 +173,10 @@ class ServiceContextPR(ServiceContext):
 
     def _check_feedback_with_llm(self, prompt: str) -> tuple[bool, str]:
         """Helper function to check feedback with LLM and parse response."""
-        response = self.llm.completion(messages=[{'role': 'user', 'content': prompt}])
+        response = self.llm.completion(input=[TextInput(text=prompt)])
 
-        answer = response.choices[0].message.content.strip()
+        assert response.output_text is not None
+        answer = response.output_text.strip()
         pattern = r'--- success\n*(true|false)\n*--- explanation*\n((?:.|\n)*)'
         match = re.search(pattern, answer)
         if match:
@@ -399,9 +401,10 @@ class ServiceContextIssue(ServiceContext):
             git_patch=git_patch or self.default_git_patch,
         )
 
-        response = self.llm.completion(messages=[{'role': 'user', 'content': prompt}])
+        response = self.llm.completion(input=[TextInput(text=prompt)])
 
-        answer = response.choices[0].message.content.strip()
+        assert response.output_text is not None
+        answer = response.output_text.strip()
         pattern = r'--- success\n*(true|false)\n*--- explanation*\n((?:.|\n)*)'
         match = re.search(pattern, answer)
         if match:

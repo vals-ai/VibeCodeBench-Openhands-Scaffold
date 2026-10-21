@@ -430,7 +430,7 @@ async def test_session_preserves_env_mcp_config(monkeypatch):
         file_store=InMemoryFileStore({}),
         config=config,
         sio=AsyncMock(),
-        llm_registry=LLMRegistry(config=OpenHandsConfig()),
+        llm_registry=MagicMock(spec=LLMRegistry),
         conversation_stats=ConversationStats(None, 'test-sid', None),
     )
 

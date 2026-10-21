@@ -75,6 +75,7 @@ def response_to_actions(
     response: QueryResult, mcp_tool_names: list[str] | None = None
 ) -> list[Action]:
     actions: list[Action] = []
+    action: Action
     if response.tool_calls:
         # Check if there's output_text. If so, add it to the thought
         thought = ''

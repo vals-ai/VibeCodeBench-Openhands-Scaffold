@@ -1,6 +1,6 @@
 import base64
 import pickle
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,6 +10,21 @@ from openhands.llm.llm_registry import LLMRegistry, RegistryEvent
 from openhands.llm.metrics import Metrics
 from openhands.server.services.conversation_stats import ConversationStats
 from openhands.storage.memory import InMemoryFileStore
+
+
+@pytest.fixture(autouse=True)
+def mock_model_construction(monkeypatch):
+    llm_type = LLM
+
+    def create_llm(service_id, config, retry_listener=None):
+        llm = MagicMock(spec=llm_type)
+        llm.service_id = service_id
+        llm.config = config
+        llm.metrics = Metrics(model_name=config.model)
+        return llm
+
+    monkeypatch.setattr('openhands.llm.llm_registry.LLM', create_llm)
+    monkeypatch.setattr(__name__ + '.LLM', create_llm)
 
 
 @pytest.fixture
@@ -187,19 +202,15 @@ def test_register_llm_with_new_service(conversation_stats):
     )
 
     # Patch the LLM class to avoid actual API calls
-    with patch('openhands.llm.llm.litellm_completion'):
-        llm = LLM(service_id='new-service', config=llm_config)
-
-        # Create a registry event
-        service_id = 'new-service'
-        event = RegistryEvent(llm=llm, service_id=service_id)
-
-        # Register the LLM
-        conversation_stats.register_llm(event)
-
-        # Verify the service was registered
-        assert service_id in conversation_stats.service_to_metrics
-        assert conversation_stats.service_to_metrics[service_id] is llm.metrics
+    llm = LLM(service_id='new-service', config=llm_config)
+    # Create a registry event
+    service_id = 'new-service'
+    event = RegistryEvent(llm=llm, service_id=service_id)
+    # Register the LLM
+    conversation_stats.register_llm(event)
+    # Verify the service was registered
+    assert service_id in conversation_stats.service_to_metrics
+    assert conversation_stats.service_to_metrics[service_id] is llm.metrics
 
 
 def test_register_llm_with_restored_metrics(conversation_stats):
@@ -220,25 +231,20 @@ def test_register_llm_with_restored_metrics(conversation_stats):
     )
 
     # Patch the LLM class to avoid actual API calls
-    with patch('openhands.llm.llm.litellm_completion'):
-        llm = LLM(service_id=service_id, config=llm_config)
-
-        # Create a registry event
-        event = RegistryEvent(llm=llm, service_id=service_id)
-
-        # Register the LLM
-        conversation_stats.register_llm(event)
-
-        # Verify the service was registered with restored metrics
-        assert service_id in conversation_stats.service_to_metrics
-        assert conversation_stats.service_to_metrics[service_id] is llm.metrics
-        assert llm.metrics.accumulated_cost == 0.1  # Restored cost
-
-        # Verify the specific service was removed from restored_metrics
-        assert service_id not in conversation_stats.restored_metrics
-        assert hasattr(
-            conversation_stats, 'restored_metrics'
-        )  # The dict should still exist
+    llm = LLM(service_id=service_id, config=llm_config)
+    # Create a registry event
+    event = RegistryEvent(llm=llm, service_id=service_id)
+    # Register the LLM
+    conversation_stats.register_llm(event)
+    # Verify the service was registered with restored metrics
+    assert service_id in conversation_stats.service_to_metrics
+    assert conversation_stats.service_to_metrics[service_id] is llm.metrics
+    assert llm.metrics.accumulated_cost == 0.1  # Restored cost
+    # Verify the specific service was removed from restored_metrics
+    assert service_id not in conversation_stats.restored_metrics
+    assert hasattr(
+        conversation_stats, 'restored_metrics'
+    )  # The dict should still exist
 
 
 def test_llm_registry_notifications(connected_registry_and_stats):
@@ -401,30 +407,23 @@ def test_register_llm_with_multiple_restored_services_bug(conversation_stats):
     )
 
     # Patch the LLM class to avoid actual API calls
-    with patch('openhands.llm.llm.litellm_completion'):
-        # Register first LLM
-        llm_1 = LLM(service_id=service_id_1, config=llm_config_1)
-        event_1 = RegistryEvent(llm=llm_1, service_id=service_id_1)
-        conversation_stats.register_llm(event_1)
-
-        # Verify first service was registered with restored metrics
-        assert service_id_1 in conversation_stats.service_to_metrics
-        assert llm_1.metrics.accumulated_cost == 0.1
-
-        # After registering first service, restored_metrics should still contain service_id_2
-        assert service_id_2 in conversation_stats.restored_metrics
-
-        # Register second LLM - this should also work with restored metrics
-        llm_2 = LLM(service_id=service_id_2, config=llm_config_2)
-        event_2 = RegistryEvent(llm=llm_2, service_id=service_id_2)
-        conversation_stats.register_llm(event_2)
-
-        # Verify second service was registered with restored metrics
-        assert service_id_2 in conversation_stats.service_to_metrics
-        assert llm_2.metrics.accumulated_cost == 0.05
-
-        # After both services are registered, restored_metrics should be empty
-        assert len(conversation_stats.restored_metrics) == 0
+    llm_1 = LLM(service_id=service_id_1, config=llm_config_1)
+    event_1 = RegistryEvent(llm=llm_1, service_id=service_id_1)
+    conversation_stats.register_llm(event_1)
+    # Verify first service was registered with restored metrics
+    assert service_id_1 in conversation_stats.service_to_metrics
+    assert llm_1.metrics.accumulated_cost == 0.1
+    # After registering first service, restored_metrics should still contain service_id_2
+    assert service_id_2 in conversation_stats.restored_metrics
+    # Register second LLM - this should also work with restored metrics
+    llm_2 = LLM(service_id=service_id_2, config=llm_config_2)
+    event_2 = RegistryEvent(llm=llm_2, service_id=service_id_2)
+    conversation_stats.register_llm(event_2)
+    # Verify second service was registered with restored metrics
+    assert service_id_2 in conversation_stats.service_to_metrics
+    assert llm_2.metrics.accumulated_cost == 0.05
+    # After both services are registered, restored_metrics should be empty
+    assert len(conversation_stats.restored_metrics) == 0
 
 
 def test_save_and_restore_workflow(mock_file_store):
@@ -481,19 +480,15 @@ def test_save_and_restore_workflow(mock_file_store):
     )
 
     # Patch the LLM class to avoid actual API calls
-    with patch('openhands.llm.llm.litellm_completion'):
-        llm = LLM(service_id=service_id, config=llm_config)
-
-        # Create a registry event
-        event = RegistryEvent(llm=llm, service_id=service_id)
-
-        # Register the LLM to trigger restoration
-        stats2.register_llm(event)
-
-        # Verify metrics were applied to the LLM
-        assert llm.metrics.accumulated_cost == 0.05
-        assert llm.metrics.accumulated_token_usage.prompt_tokens == 100
-        assert llm.metrics.accumulated_token_usage.completion_tokens == 50
+    llm = LLM(service_id=service_id, config=llm_config)
+    # Create a registry event
+    event = RegistryEvent(llm=llm, service_id=service_id)
+    # Register the LLM to trigger restoration
+    stats2.register_llm(event)
+    # Verify metrics were applied to the LLM
+    assert llm.metrics.accumulated_cost == 0.05
+    assert llm.metrics.accumulated_token_usage.prompt_tokens == 100
+    assert llm.metrics.accumulated_token_usage.completion_tokens == 50
 
 
 def test_merge_conversation_stats_success_non_overlapping(mock_file_store):
@@ -660,10 +655,9 @@ def test_save_metrics_preserves_restored_metrics_fix(mock_file_store):
         retry_max_wait=2,
     )
 
-    with patch('openhands.llm.llm.litellm_completion'):
-        llm_a = LLM(service_id=service_a, config=llm_config)
-        event_a = RegistryEvent(llm=llm_a, service_id=service_a)
-        stats2.register_llm(event_a)
+    llm_a = LLM(service_id=service_a, config=llm_config)
+    event_a = RegistryEvent(llm=llm_a, service_id=service_a)
+    stats2.register_llm(event_a)
 
     # Verify service_a was moved from restored_metrics to service_to_metrics
     assert service_a in stats2.service_to_metrics

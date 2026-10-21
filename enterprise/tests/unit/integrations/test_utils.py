@@ -1,7 +1,7 @@
 """Tests for enterprise integrations utils module."""
 
 import pytest
-from integrations.utils import get_summary_for_agent_state
+from integrations.utils import get_last_user_msg, get_summary_for_agent_state
 
 from openhands.core.schema.agent import AgentState
 from openhands.events.observation.agent import AgentStateChangedObservation
@@ -157,3 +157,19 @@ class TestGetSummaryForAgentState:
         assert 'try again later' in result.lower()
         # RATE_LIMITED doesn't include conversation link in response
         assert self.conversation_link not in result
+
+
+def test_last_user_message_uses_latest_matching_event():
+    from openhands.events import EventSource, EventStream
+    from openhands.events.action import MessageAction
+    from openhands.storage.memory import InMemoryFileStore
+
+    stream = EventStream('latest-user-message', InMemoryFileStore())
+    try:
+        stream.add_event(MessageAction(content='first task'), EventSource.USER)
+        latest = MessageAction(content='second task')
+        stream.add_event(latest, EventSource.USER)
+        stream.add_event(MessageAction(content='agent response'), EventSource.AGENT)
+        assert get_last_user_msg(stream) == [latest]
+    finally:
+        stream.close()
