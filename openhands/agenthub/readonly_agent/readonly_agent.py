@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 from openhands.llm.llm_registry import LLMRegistry
 
 if TYPE_CHECKING:
-    from model_library.base import QueryResult, ToolDefinition
+    from litellm import ChatCompletionToolParam
 
     from openhands.events.action import Action
+    from openhands.llm.llm import ModelResponse
 
 from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
 from openhands.agenthub.readonly_agent import (
@@ -49,7 +50,7 @@ class ReadOnlyAgent(CodeActAgent):
         super().__init__(config, llm_registry)
 
         logger.debug(
-            f'TOOLS loaded for ReadOnlyAgent: {", ".join([tool.name for tool in self.tools])}'
+            f'TOOLS loaded for ReadOnlyAgent: {", ".join([tool.get("function").get("name") for tool in self.tools])}'
         )
 
     @property
@@ -61,12 +62,12 @@ class ReadOnlyAgent(CodeActAgent):
             )
         return self._prompt_manager
 
-    def _get_tools(self) -> list['ToolDefinition']:
+    def _get_tools(self) -> list['ChatCompletionToolParam']:
         # Override the tools to only include read-only tools
         # Get the read-only tools from our own function_calling module
         return readonly_function_calling.get_tools()
 
-    def set_mcp_tools(self, mcp_tools: list['ToolDefinition']) -> None:
+    def set_mcp_tools(self, mcp_tools: list[dict]) -> None:
         """Sets the list of MCP tools for the agent.
 
         Args:
@@ -76,7 +77,7 @@ class ReadOnlyAgent(CodeActAgent):
             'ReadOnlyAgent does not support MCP tools. MCP tools will be ignored by the agent.'
         )
 
-    def response_to_actions(self, response: 'QueryResult') -> list['Action']:
+    def response_to_actions(self, response: 'ModelResponse') -> list['Action']:
         return readonly_function_calling.response_to_actions(
             response, mcp_tool_names=list(self.mcp_tools.keys())
         )

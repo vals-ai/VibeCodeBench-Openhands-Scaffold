@@ -14,11 +14,6 @@ from openhands.server.session.conversation_init_data import ConversationInitData
 from openhands.storage.memory import InMemoryFileStore
 
 
-@pytest.fixture(autouse=True)
-def mock_model_registry(monkeypatch):
-    monkeypatch.setattr('openhands.utils.utils.LLMRegistry', MagicMock())
-
-
 @dataclass
 class GetMessageMock:
     message: dict | None

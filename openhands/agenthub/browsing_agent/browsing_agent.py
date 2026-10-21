@@ -2,7 +2,6 @@ import os
 
 from browsergym.core.action.highlevel import HighLevelActionSet
 from browsergym.utils.obs import flatten_axtree_to_str
-from model_library.base import TextInput
 
 from openhands.agenthub.browsing_agent.response_parser import BrowsingResponseParser
 from openhands.controller.agent import Agent
@@ -205,9 +204,7 @@ class BrowsingAgent(Agent):
         goal, _ = state.get_current_user_intent()
 
         if goal is None:
-            goal = next(
-                item.text for item in state.inputs if isinstance(item, TextInput)
-            )
+            goal = state.inputs['task']
 
         system_msg = get_system_message(
             goal,

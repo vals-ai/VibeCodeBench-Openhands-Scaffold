@@ -147,7 +147,9 @@ def event_to_dict(event: 'Event') -> dict[str, Any]:
             model_response = d['model_response']
             if not isinstance(model_response, QueryResult):
                 raise TypeError('model_response must be a QueryResult')
-            d['model_response'] = model_response.model_dump(exclude={'history', 'raw'})
+            d['model_response'] = model_response.model_dump(
+                exclude={'history', 'raw'}
+            )
         if key == 'response_id' and 'response_id' in d:
             if not isinstance(d['response_id'], str):
                 raise TypeError('response_id must be a string')

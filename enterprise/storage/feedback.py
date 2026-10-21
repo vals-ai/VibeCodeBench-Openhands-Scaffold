@@ -1,5 +1,4 @@
 from sqlalchemy import JSON, Column, DateTime, Enum, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from storage.base import Base
 
@@ -10,10 +9,10 @@ class Feedback(Base):  # type: ignore
     id = Column(String, primary_key=True)
     version = Column(String, nullable=False)
     email = Column(String, nullable=False)
-    polarity: Mapped[str] = mapped_column(
+    polarity = Column(
         Enum('positive', 'negative', name='polarity_enum'), nullable=False
     )
-    permissions: Mapped[str] = mapped_column(
+    permissions = Column(
         Enum('public', 'private', name='permissions_enum'), nullable=False
     )
     trajectory = Column(JSON, nullable=True)

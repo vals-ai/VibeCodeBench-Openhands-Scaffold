@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from litellm import ModelResponse
 from model_library.base import (
     QueryResult,
     QueryResultExtras,
@@ -25,15 +26,30 @@ from openhands.events.event import FileEditSource, FileReadSource
 from openhands.events.serialization import event_to_dict
 
 
-def create_mock_response(function_name: str, arguments: dict) -> QueryResult:
-    return QueryResult(
-        tool_calls=[
-            ToolCall(
-                id='mock-tool-call-id',
-                name=function_name,
-                args=json.dumps(arguments),
-            )
-        ]
+def create_mock_response(function_name: str, arguments: dict) -> ModelResponse:
+    """Helper function to create a mock response with a tool call."""
+    return ModelResponse(
+        id='mock-id',
+        choices=[
+            {
+                'message': {
+                    'tool_calls': [
+                        {
+                            'function': {
+                                'name': function_name,
+                                'arguments': json.dumps(arguments),
+                            },
+                            'id': 'mock-tool-call-id',
+                            'type': 'function',
+                        }
+                    ],
+                    'content': None,
+                    'role': 'assistant',
+                },
+                'index': 0,
+                'finish_reason': 'tool_calls',
+            }
+        ],
     )
 
 
@@ -270,10 +286,28 @@ def test_browser_missing_code():
 
 def test_invalid_json_arguments():
     """Test handling of invalid JSON in arguments."""
-    response = QueryResult(
-        tool_calls=[
-            ToolCall(id='mock-tool-call-id', name='execute_bash', args='invalid json')
-        ]
+    response = ModelResponse(
+        id='mock-id',
+        choices=[
+            {
+                'message': {
+                    'tool_calls': [
+                        {
+                            'function': {
+                                'name': 'execute_bash',
+                                'arguments': 'invalid json',
+                            },
+                            'id': 'mock-tool-call-id',
+                            'type': 'function',
+                        }
+                    ],
+                    'content': None,
+                    'role': 'assistant',
+                },
+                'index': 0,
+                'finish_reason': 'tool_calls',
+            }
+        ],
     )
     with pytest.raises(FunctionCallValidationError) as exc_info:
         response_to_actions(response)

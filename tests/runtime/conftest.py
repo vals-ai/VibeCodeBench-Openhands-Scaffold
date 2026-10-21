@@ -3,7 +3,6 @@ import random
 import shutil
 import stat
 import time
-from unittest.mock import Mock
 
 import pytest
 from pytest import TempPathFactory
@@ -270,7 +269,8 @@ def _load_runtime(
     )
     event_stream = EventStream(sid, file_store)
 
-    llm_registry = Mock(spec=LLMRegistry)
+    # Create a LLMRegistry instance for the runtime
+    llm_registry = LLMRegistry(config=OpenHandsConfig())
 
     runtime = runtime_cls(
         config=config,
