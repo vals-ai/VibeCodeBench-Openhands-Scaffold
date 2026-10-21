@@ -9,7 +9,6 @@ from openhands.core.config import LLMConfig, OpenHandsConfig
 from openhands.core.config.agent_config import AgentConfig
 from openhands.events import EventStream, EventStreamSubscriber
 from openhands.integrations.service_types import ProviderType
-from openhands.llm.llm import LLM
 from openhands.llm.llm_registry import LLMRegistry
 from openhands.llm.metrics import Metrics
 from openhands.memory.memory import Memory
@@ -24,17 +23,8 @@ from openhands.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture
-def mock_llm_registry(monkeypatch):
+def mock_llm_registry():
     """Create a mock LLM registry that properly simulates LLM registration"""
-
-    def create_llm(service_id, config, retry_listener=None):
-        llm = MagicMock(spec=LLM)
-        llm.service_id = service_id
-        llm.config = config
-        llm.metrics = Metrics(model_name=config.model)
-        return llm
-
-    monkeypatch.setattr('openhands.llm.llm_registry.LLM', create_llm)
     config = OpenHandsConfig()
     registry = LLMRegistry(config=config, agent_cls=None, retry_listener=None)
     return registry

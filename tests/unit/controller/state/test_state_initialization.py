@@ -12,9 +12,9 @@ def test_initial_state_preserves_shared_iteration_budget():
     tracker = StateTracker(None, None, None)
 
     tracker.set_initial_state(
-        'test',
+        "test",
         state,
-        ConversationStats(None, 'test', None),
+        ConversationStats(None, "test", None),
         max_iterations=30,
         max_budget_per_task=None,
     )

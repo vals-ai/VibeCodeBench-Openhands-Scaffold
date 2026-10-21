@@ -113,7 +113,7 @@ async def test_cleanup_session_handles_exceptions(
 
 
 @pytest_asyncio.fixture
-def mock_config(monkeypatch):
+def mock_config():
     config = MagicMock()
     config.runtime = 'local'
     config.cli_multiline_input = False
@@ -133,11 +133,6 @@ def mock_config(monkeypatch):
         None  # This prevents finalize_config from overriding workspace_base
     )
     config.model_name = 'model'
-    monkeypatch.setattr(
-        cli,
-        'create_registry_and_conversation_stats',
-        lambda config, sid, user_id: (MagicMock(), MagicMock(), config),
-    )
 
     return config
 
@@ -190,7 +185,8 @@ async def test_run_session_without_initial_action(
     mock_create_runtime.return_value = mock_runtime
 
     mock_controller = AsyncMock()
-    mock_create_controller.return_value = (mock_controller, None)
+    mock_controller_task = MagicMock()
+    mock_create_controller.return_value = (mock_controller, mock_controller_task)
 
     # Create a regular MagicMock for memory to avoid coroutine issues
     mock_memory = MagicMock()

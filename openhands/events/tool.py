@@ -12,10 +12,10 @@ class ToolCallMetadata(BaseModel):
     model_response: QueryResult
     total_calls_in_response: int
 
-    @field_serializer('model_response')
+    @field_serializer("model_response")
     def serialize_model_response(
         self, model_response: QueryResult, _info: Any
     ) -> dict[str, Any]:
-        response_dict = model_response.model_dump(exclude={'history', 'raw'})
+        response_dict = model_response.model_dump(exclude={"history", "raw"})
 
         return response_dict

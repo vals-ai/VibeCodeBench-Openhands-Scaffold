@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from openhands.controller.state.state import State
 from openhands.core.config.condenser_config import (
     AmortizedForgettingCondenserConfig,
     BrowserOutputCondenserConfig,
@@ -16,6 +17,7 @@ from openhands.core.config.condenser_config import (
     StructuredSummaryCondenserConfig,
 )
 from openhands.core.config.llm_config import LLMConfig
+from openhands.core.config.openhands_config import OpenHandsConfig
 from openhands.core.message import Message, TextContent
 from openhands.core.schema.action import ActionType
 from openhands.events.event import Event, EventSource
@@ -108,8 +110,11 @@ def mock_conversation_stats() -> ConversationStats:
 
 @pytest.fixture
 def mock_llm_registry(mock_llm, mock_conversation_stats) -> LLMRegistry:
-    registry = MagicMock(spec=LLMRegistry)
-    registry.get_llm.return_value = mock_llm
+    """Creates an actual LLMRegistry that returns real LLMs."""
+    # Create an actual LLMRegistry with a basic OpenHandsConfig
+    config = OpenHandsConfig()
+    registry = LLMRegistry(config=config, agent_cls=None, retry_listener=None)
+
     return registry
 
 
@@ -135,24 +140,24 @@ class RollingCondenserTestHarness:
 
         This generator assumes we're starting from an empty history.
         """
-        history = []
+        state = State()
 
         for event in events:
             # Set the event's ID -- this is normally done by the event stream,
             # but this harness is intended to act as a testing stand-in.
             if not hasattr(event, '_id'):
-                event._id = len(history)
+                event._id = len(state.history)
 
-            history.append(event)
+            state.history.append(event)
             for callback in self.callbacks:
-                callback(history)
+                callback(state.history)
 
-            match self.condenser.condense(View.from_events(history)):
+            match self.condenser.condensed_history(state):
                 case View() as view:
                     yield view
 
-                case Condensation(action=condensation_event):
-                    history.append(condensation_event)
+                case Condensation(event=condensation_event):
+                    state.history.append(condensation_event)
 
     def expected_size(self, index: int, max_size: int) -> int:
         """Calculate the expected size of the view at the given index.
@@ -198,9 +203,11 @@ def test_noop_condenser():
         create_test_event('Event 2'),
         create_test_event('Event 3'),
     ]
+    state = State()
+    state.history = events
 
     condenser = NoOpCondenser()
-    result = condenser.condense(View.from_events(events))
+    result = condenser.condensed_history(state)
 
     assert result == View(events=events)
 
@@ -228,7 +235,9 @@ def test_observation_masking_condenser_respects_attention_window():
         Observation('Observation 2'),
     ]
 
-    result = condenser.condense(View.from_events(events))
+    state = State()
+    state.history = events
+    result = condenser.condensed_history(state)
 
     assert len(result) == len(events)
 
@@ -267,7 +276,10 @@ def test_browser_output_condenser_respects_attention_window():
         BrowserOutputObservation('Observation 4', url='', trigger_by_action=''),
     ]
 
-    result = condenser.condense(View.from_events(events))
+    state = State()
+    state.history = events
+
+    result = condenser.condensed_history(state)
 
     assert len(result) == len(events)
     cnt = 4
@@ -304,16 +316,19 @@ def test_recent_events_condenser():
         create_test_event('Event 5'),
     ]
 
+    state = State()
+    state.history = events
+
     # If the max_events are larger than the number of events, equivalent to a NoOpCondenser.
     condenser = RecentEventsCondenser(max_events=len(events))
-    result = condenser.condense(View.from_events(events))
+    result = condenser.condensed_history(state)
 
     assert result == View(events=events)
 
     # If the max_events are smaller than the number of events, only keep the last few.
     max_events = 3
     condenser = RecentEventsCondenser(max_events=max_events)
-    result = condenser.condense(View.from_events(events))
+    result = condenser.condensed_history(state)
 
     assert len(result) == max_events
     assert result[0]._message == 'Event 1'  # kept from keep_first
@@ -324,7 +339,7 @@ def test_recent_events_condenser():
     keep_first = 1
     max_events = 2
     condenser = RecentEventsCondenser(keep_first=keep_first, max_events=max_events)
-    result = condenser.condense(View.from_events(events))
+    result = condenser.condensed_history(state)
 
     assert len(result) == max_events
     assert result[0]._message == 'Event 1'
@@ -334,7 +349,7 @@ def test_recent_events_condenser():
     keep_first = 2
     max_events = 3
     condenser = RecentEventsCondenser(keep_first=keep_first, max_events=max_events)
-    result = condenser.condense(View.from_events(events))
+    result = condenser.condensed_history(state)
 
     assert len(result) == max_events
     assert result[0]._message == 'Event 1'  # kept from keep_first

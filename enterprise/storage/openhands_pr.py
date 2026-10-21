@@ -9,7 +9,6 @@ from sqlalchemy import (
     String,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
 from storage.base import Base
 
 
@@ -23,7 +22,7 @@ class OpenhandsPR(Base):  # type: ignore
     repo_id = Column(String, nullable=False, index=True)
     repo_name = Column(String, nullable=False)
     pr_number = Column(Integer, nullable=False, index=True)
-    status: Mapped[PRStatus] = mapped_column(
+    status = Column(
         Enum(PRStatus),
         nullable=False,
         index=True,

@@ -119,7 +119,9 @@ class TestToolCreation:
         """Test tool creation in DockerRuntime shows /workspace in description."""
         with patch.dict(os.environ, {'SANDBOX_VOLUMES': '/host/app:/workspace:rw'}):
             tool = create_str_replace_editor_tool(runtime_type='docker')
-            path_description = tool.body.properties['path']['description']
+            path_description = tool['function']['parameters']['properties']['path'][
+                'description'
+            ]
             assert '/workspace/file.py' in path_description
             assert '/workspace`.' in path_description
             # Should not contain host paths
@@ -129,7 +131,9 @@ class TestToolCreation:
         """Test tool creation in LocalRuntime shows host path in description."""
         with patch.dict(os.environ, {'SANDBOX_VOLUMES': '/host/app:/workspace:rw'}):
             tool = create_str_replace_editor_tool(runtime_type='local')
-            path_description = tool.body.properties['path']['description']
+            path_description = tool['function']['parameters']['properties']['path'][
+                'description'
+            ]
             assert '/host/app/file.py' in path_description
             assert '/host/app`.' in path_description
 
@@ -137,7 +141,9 @@ class TestToolCreation:
         """Test tool creation in CLIRuntime shows host path in description."""
         with patch.dict(os.environ, {'SANDBOX_VOLUMES': '/host/app:/workspace:rw'}):
             tool = create_str_replace_editor_tool(runtime_type='cli')
-            path_description = tool.body.properties['path']['description']
+            path_description = tool['function']['parameters']['properties']['path'][
+                'description'
+            ]
             assert '/host/app/file.py' in path_description
             assert '/host/app`.' in path_description
 
@@ -145,7 +151,9 @@ class TestToolCreation:
         """Test tool creation in RemoteRuntime shows /workspace in description."""
         with patch.dict(os.environ, {'SANDBOX_VOLUMES': '/host/app:/workspace:rw'}):
             tool = create_str_replace_editor_tool(runtime_type='remote')
-            path_description = tool.body.properties['path']['description']
+            path_description = tool['function']['parameters']['properties']['path'][
+                'description'
+            ]
             assert '/workspace/file.py' in path_description
             assert '/workspace`.' in path_description
             # Should not contain host paths
@@ -155,7 +163,9 @@ class TestToolCreation:
         """Test tool creation in E2BRuntime shows /workspace in description."""
         with patch.dict(os.environ, {'SANDBOX_VOLUMES': '/host/app:/workspace:rw'}):
             tool = create_str_replace_editor_tool(runtime_type='e2b')
-            path_description = tool.body.properties['path']['description']
+            path_description = tool['function']['parameters']['properties']['path'][
+                'description'
+            ]
             assert '/workspace/file.py' in path_description
             assert '/workspace`.' in path_description
             # Should not contain host paths
@@ -166,7 +176,9 @@ class TestToolCreation:
         tool = create_str_replace_editor_tool(
             workspace_mount_path_in_sandbox='/custom/path'
         )
-        path_description = tool.body.properties['path']['description']
+        path_description = tool['function']['parameters']['properties']['path'][
+            'description'
+        ]
         assert '/custom/path/file.py' in path_description
         assert '/custom/path`.' in path_description
 
@@ -176,7 +188,9 @@ class TestToolCreation:
             tool = create_str_replace_editor_tool(
                 use_short_description=True, runtime_type='local'
             )
-            path_description = tool.body.properties['path']['description']
+            path_description = tool['function']['parameters']['properties']['path'][
+                'description'
+            ]
             assert '/host/app/file.py' in path_description
             assert '/host/app`.' in path_description
 

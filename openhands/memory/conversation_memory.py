@@ -1,6 +1,6 @@
 from typing import Generator
 
-from model_library.base import QueryResult
+from litellm import ModelResponse
 
 from openhands.core.config.agent_config import AgentConfig
 from openhands.core.logger import openhands_logger as logger
@@ -102,7 +102,7 @@ class ConversationMemory:
         messages = []
 
         # Process regular events
-        pending_tool_call_action_messages: dict[tuple[str | None, ...], Message] = {}
+        pending_tool_call_action_messages: dict[str, Message] = {}
         tool_call_id_to_message: dict[str, Message] = {}
 
         for i, event in enumerate(events):
@@ -127,9 +127,9 @@ class ConversationMemory:
                 raise ValueError(f'Unknown event type: {type(event)}')
 
             # Check pending tool call action messages and see if they are complete
-            _batches_to_remove = []
+            _response_ids_to_remove = []
             for (
-                batch_key,
+                response_id,
                 pending_message,
             ) in pending_tool_call_action_messages.items():
                 assert pending_message.tool_calls is not None, (
@@ -147,10 +147,10 @@ class ConversationMemory:
                     for tool_call in pending_message.tool_calls:
                         messages_to_add.append(tool_call_id_to_message[tool_call.id])
                         tool_call_id_to_message.pop(tool_call.id)
-                    _batches_to_remove.append(batch_key)
+                    _response_ids_to_remove.append(response_id)
             # Cleanup the processed pending tool messages
-            for batch_key in _batches_to_remove:
-                pending_tool_call_action_messages.pop(batch_key)
+            for response_id in _response_ids_to_remove:
+                pending_tool_call_action_messages.pop(response_id)
 
             messages += messages_to_add
 
@@ -183,7 +183,7 @@ class ConversationMemory:
     def _process_action(
         self,
         action: Action,
-        pending_tool_call_action_messages: dict[tuple[str | None, ...], Message],
+        pending_tool_call_action_messages: dict[str, Message],
         vision_is_active: bool = False,
     ) -> list[Message]:
         """Converts an action into a message format that can be sent to the LLM.
@@ -204,7 +204,7 @@ class ConversationMemory:
                 - AgentFinishAction: For ending the interaction
                 - MessageAction: For sending messages
                 - MCPAction: For interacting with the MCP server
-            pending_tool_call_action_messages: Dictionary mapping tool-call batches to their corresponding messages.
+            pending_tool_call_action_messages: Dictionary mapping response IDs to their corresponding messages.
                 Used in function calling mode to track tool calls that are waiting for their results.
 
             vision_is_active: Whether vision is active in the LLM. If True, image URLs will be included
@@ -254,18 +254,18 @@ class ConversationMemory:
                 + str(action)
             )
 
-            llm_response: QueryResult = tool_metadata.model_response
+            llm_response: ModelResponse = tool_metadata.model_response
+            assistant_msg = llm_response.choices[0].message
 
             # Add the LLM message (assistant) that initiated the tool calls
-            # (overwrites any previous message for the same tool-call batch)
-            response_key = tuple(tool.id for tool in llm_response.tool_calls)
-            pending_tool_call_action_messages[response_key] = Message(
-                role='assistant',
+            # (overwrites any previous message with the same response_id)
+            pending_tool_call_action_messages[llm_response.id] = Message(
+                role=getattr(assistant_msg, 'role', 'assistant'),
                 # tool call content SHOULD BE a string
-                content=[TextContent(text=llm_response.output_text)]
-                if llm_response.output_text and llm_response.output_text.strip()
+                content=[TextContent(text=assistant_msg.content)]
+                if assistant_msg.content and assistant_msg.content.strip()
                 else [],
-                tool_calls=llm_response.tool_calls,
+                tool_calls=assistant_msg.tool_calls,
             )
             return []
         elif isinstance(action, AgentFinishAction):
@@ -277,7 +277,8 @@ class ConversationMemory:
             tool_metadata = action.tool_call_metadata
             if tool_metadata is not None:
                 # take the response message from the tool call
-                content = tool_metadata.model_response.output_text or ''
+                assistant_msg = tool_metadata.model_response.choices[0].message
+                content = assistant_msg.content or ''
 
                 # save content if any, to thought
                 if action.thought:
@@ -358,7 +359,8 @@ class ConversationMemory:
             tool_call_id_to_message[tool_call_metadata.tool_call_id] = Message(
                 role='tool',
                 content=[],
-                id=tool_call_metadata.tool_call_id,
+                tool_call_id=tool_call_metadata.tool_call_id,
+                name=tool_call_metadata.function_name,
             )
             return True
         return False
@@ -708,7 +710,8 @@ class ConversationMemory:
             tool_call_id_to_message[tool_call_metadata.tool_call_id] = Message(
                 role='tool',
                 content=message.content,
-                id=tool_call_metadata.tool_call_id,
+                tool_call_id=tool_call_metadata.tool_call_id,
+                name=tool_call_metadata.function_name,
             )
             # No need to return the observation message
             # because it will be added by get_action_message when all the corresponding
@@ -800,13 +803,15 @@ class ConversationMemory:
             if message.role == 'assistant' and tool_call.id
         }
         tool_response_ids = {
-            message.id for message in messages if message.role == 'tool' and message.id
+            message.tool_call_id
+            for message in messages
+            if message.role == 'tool' and message.tool_call_id
         }
 
         for message in messages:
             # Remove tool messages with no matching assistant tool call
-            if message.role == 'tool' and message.id:
-                if message.id in tool_call_ids:
+            if message.role == 'tool' and message.tool_call_id:
+                if message.tool_call_id in tool_call_ids:
                     yield message
 
             # Remove assistant tool calls with no matching tool response

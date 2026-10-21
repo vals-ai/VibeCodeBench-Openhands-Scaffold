@@ -4,7 +4,7 @@ import base64
 import os
 import pickle
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
 from model_library.base import InputItem, ToolCall
 
@@ -15,22 +15,16 @@ from openhands.controller.state.control_flags import (
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.schema import AgentState
-from openhands.events.action import MessageAction
-from openhands.events.action.agent import AgentFinishAction, ChangeAgentStateAction
+from openhands.events.action.agent import ChangeAgentStateAction
 from openhands.events.action.empty import NullAction
 from openhands.events.event import Event
 from openhands.events.event_filter import EventFilter
 from openhands.events.observation.agent import AgentStateChangedObservation
 from openhands.events.observation.empty import NullObservation
 from openhands.llm.metrics import Metrics
-from openhands.memory.view import View
 from openhands.server.services.conversation_stats import ConversationStats
 from openhands.storage.files import FileStore
 from openhands.storage.locations import get_conversation_agent_state_filename
-
-if TYPE_CHECKING:
-    from openhands.events.stream import EventStream
-
 
 RESUMABLE_STATES = [
     AgentState.RUNNING,
@@ -105,30 +99,6 @@ class State:
     last_error: str = ''
 
     metrics: Metrics = field(default_factory=Metrics)
-    _event_stream: EventStream = field(init=False, repr=False, compare=False)
-
-    def bind_event_stream(self, event_stream: EventStream) -> None:
-        self._event_stream = event_stream
-
-    @property
-    def history(self) -> list[Event]:
-        return self.get_history_from_stream(self._event_stream)
-
-    @property
-    def view(self) -> View:
-        return View.from_events(self.history)
-
-    def get_current_user_intent(self) -> tuple[str | None, list[str] | None]:
-        last_user_message = None
-        last_user_message_image_urls: list[str] | None = []
-        for event in reversed(self.view):
-            if isinstance(event, MessageAction) and event.source == 'user':
-                last_user_message = event.content
-                last_user_message_image_urls = event.image_urls
-            elif isinstance(event, AgentFinishAction):
-                if last_user_message is not None:
-                    return last_user_message, None
-        return last_user_message, last_user_message_image_urls
 
     def save_to_session(
         self, sid: str, file_store: FileStore, user_id: str | None
@@ -202,7 +172,6 @@ class State:
     @override
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
-        state.pop('_event_stream', None)
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -246,7 +215,7 @@ class State:
             return self.metrics
         return self.metrics.diff(self.parent_metrics_snapshot)
 
-    def get_history_from_stream(self, event_stream: EventStream) -> list[Event]:
+    def get_history_from_stream(self, event_stream: Any) -> list[Event]:
         """Fetch history from event_stream for compatibility with legacy code.
 
         Args:

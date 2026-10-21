@@ -8,7 +8,6 @@ from typing import Type
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy.orm import Mapped, mapped_column
 from storage.base import Base
 
 from openhands.events.observation.agent import AgentStateChangedObservation
@@ -68,11 +67,11 @@ class ConversationCallback(Base):  # type: ignore
         nullable=False,
         index=True,
     )
-    status: Mapped[CallbackStatus] = mapped_column(
+    status = Column(
         SQLEnum(CallbackStatus), nullable=False, default=CallbackStatus.ACTIVE
     )
-    processor_type: Mapped[str] = mapped_column(String, nullable=False)
-    processor_json: Mapped[str] = mapped_column(Text, nullable=False)
+    processor_type = Column(String, nullable=False)
+    processor_json = Column(Text, nullable=False)
     created_at = Column(
         DateTime,
         server_default=text('CURRENT_TIMESTAMP'),

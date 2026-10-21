@@ -32,7 +32,7 @@ class MockRuntime(Runtime):
         event_stream.file_store = file_store
 
         # Create a mock LLM registry
-        llm_registry = MagicMock(spec=LLMRegistry)
+        llm_registry = LLMRegistry(config)
 
         # Initialize the parent class properly
         super().__init__(

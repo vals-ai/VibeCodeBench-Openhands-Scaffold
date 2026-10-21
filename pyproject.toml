@@ -207,10 +207,10 @@ ignore = [ "E501" ]
 # prevent black (if installed) from changing single quotes to double quotes
 skip-string-normalization = true
 
-[tool.ruff]
-lint.select = [ "ASYNC", "B", "E", "F", "I", "Q", "UP006", "UP007", "UP008", "W" ]
-lint.ignore = [ "D1", "E501" ]
-lint.pydocstyle.convention = "google"
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "Q", "B", "ASYNC", "UP006", "UP007", "UP008"]
+ignore = [ "D1", "E501" ]
+pydocstyle.convention = "google"
 
 [tool.coverage.run]
 concurrency = [ "gevent" ]

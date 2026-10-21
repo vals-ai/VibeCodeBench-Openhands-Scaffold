@@ -6,7 +6,9 @@ from uuid import uuid4
 
 import pytest
 from litellm import (
+    BadRequestError,
     ContentPolicyViolationError,
+    ContextWindowExceededError,
 )
 from model_library.base import (
     QueryResult,
@@ -25,7 +27,6 @@ from openhands.controller.state.state import State
 from openhands.core.config import OpenHandsConfig
 from openhands.core.config.agent_config import AgentConfig
 from openhands.core.config.llm_config import LLMConfig
-from openhands.core.exceptions import LLMContextWindowExceedError
 from openhands.core.main import run_controller
 from openhands.core.schema import AgentState
 from openhands.events import Event, EventSource, EventStream, EventStreamSubscriber
@@ -81,18 +82,9 @@ def event_loop():
 
 
 @pytest.fixture
-def mock_agent_with_stats(monkeypatch):
+def mock_agent_with_stats():
     """Create a mock agent with properly connected LLM registry and conversation stats."""
     import uuid
-
-    def create_llm(service_id, config, retry_listener=None):
-        llm = MagicMock(spec=LLM)
-        llm.service_id = service_id
-        llm.config = config
-        llm.metrics = Metrics(model_name=config.model)
-        return llm
-
-    monkeypatch.setattr('openhands.llm.llm_registry.LLM', create_llm)
 
     # Create LLM registry
     config = OpenHandsConfig()
@@ -448,6 +440,150 @@ async def test_react_to_content_policy_violation(
 
 
 @pytest.mark.asyncio
+async def test_run_controller_with_fatal_error(
+    test_event_stream, mock_memory, mock_agent_with_stats
+):
+    config = OpenHandsConfig()
+    mock_agent, conversation_stats, llm_registry = mock_agent_with_stats
+
+    def agent_step_fn(state):
+        print(f'agent_step_fn received state: {state}')
+        return CmdRunAction(command='ls')
+
+    mock_agent.step = agent_step_fn
+
+    runtime = MagicMock(spec=ActionExecutionClient)
+
+    def on_event(event: Event):
+        if isinstance(event, CmdRunAction):
+            error_obs = ErrorObservation('You messed around with Jim')
+            error_obs._cause = event.id
+            test_event_stream.add_event(error_obs, EventSource.USER)
+
+    test_event_stream.subscribe(EventStreamSubscriber.RUNTIME, on_event, str(uuid4()))
+    runtime.event_stream = test_event_stream
+    runtime.config = copy.deepcopy(config)
+
+    def on_event_memory(event: Event):
+        if isinstance(event, RecallAction):
+            microagent_obs = RecallObservation(
+                content='Test microagent content',
+                recall_type=RecallType.KNOWLEDGE,
+            )
+            microagent_obs._cause = event.id
+            test_event_stream.add_event(microagent_obs, EventSource.ENVIRONMENT)
+
+    test_event_stream.subscribe(
+        EventStreamSubscriber.MEMORY, on_event_memory, str(uuid4())
+    )
+
+    # Mock the create_agent function to return our mock agent
+    with patch('openhands.core.main.create_agent', return_value=mock_agent):
+        state = await run_controller(
+            config=config,
+            initial_user_action=MessageAction(content='Test message'),
+            runtime=runtime,
+            sid='test',
+            fake_user_response_fn=lambda _: 'repeat',
+            memory=mock_memory,
+        )
+    print(f'state: {state}')
+    events = list(test_event_stream.get_events())
+    print(f'event_stream: {events}')
+    error_observations = test_event_stream.get_matching_events(
+        reverse=True, limit=1, event_types=(AgentStateChangedObservation)
+    )
+    assert len(error_observations) == 1
+    error_observation = error_observations[0]
+    assert state.iteration_flag.current_value == 3
+    assert state.agent_state == AgentState.ERROR
+    assert state.last_error == 'AgentStuckInLoopError: Agent got stuck in a loop'
+    assert (
+        error_observation.reason == 'AgentStuckInLoopError: Agent got stuck in a loop'
+    )
+    assert len(events) == 12
+
+
+@pytest.mark.asyncio
+async def test_run_controller_stop_with_stuck(
+    test_event_stream, mock_memory, mock_agent_with_stats
+):
+    config = OpenHandsConfig()
+    mock_agent, conversation_stats, llm_registry = mock_agent_with_stats
+
+    def agent_step_fn(state):
+        print(f'agent_step_fn received state: {state}')
+        return CmdRunAction(command='ls')
+
+    mock_agent.step = agent_step_fn
+
+    runtime = MagicMock(spec=ActionExecutionClient)
+
+    def on_event(event: Event):
+        if isinstance(event, CmdRunAction):
+            non_fatal_error_obs = ErrorObservation(
+                'Non fatal error here to trigger loop'
+            )
+            non_fatal_error_obs._cause = event.id
+            test_event_stream.add_event(non_fatal_error_obs, EventSource.ENVIRONMENT)
+
+    test_event_stream.subscribe(EventStreamSubscriber.RUNTIME, on_event, str(uuid4()))
+    runtime.event_stream = test_event_stream
+    runtime.config = copy.deepcopy(config)
+
+    def on_event_memory(event: Event):
+        if isinstance(event, RecallAction):
+            microagent_obs = RecallObservation(
+                content='Test microagent content',
+                recall_type=RecallType.KNOWLEDGE,
+            )
+            microagent_obs._cause = event.id
+            test_event_stream.add_event(microagent_obs, EventSource.ENVIRONMENT)
+
+    test_event_stream.subscribe(
+        EventStreamSubscriber.MEMORY, on_event_memory, str(uuid4())
+    )
+
+    # Mock the create_agent function to return our mock agent
+    with patch('openhands.core.main.create_agent', return_value=mock_agent):
+        state = await run_controller(
+            config=config,
+            initial_user_action=MessageAction(content='Test message'),
+            runtime=runtime,
+            sid='test',
+            fake_user_response_fn=lambda _: 'repeat',
+            memory=mock_memory,
+        )
+    events = list(test_event_stream.get_events())
+    print(f'state: {state}')
+    for i, event in enumerate(events):
+        print(f'event {i}: {event_to_dict(event)}')
+
+    assert state.iteration_flag.current_value == 3
+    assert len(events) == 12
+    # check the eventstream have 4 pairs of repeated actions and observations
+    # With the refactored system message handling, we need to adjust the range
+    repeating_actions_and_observations = events[5:13]
+    for action, observation in zip(
+        repeating_actions_and_observations[0::2],
+        repeating_actions_and_observations[1::2],
+    ):
+        action_dict = event_to_dict(action)
+        observation_dict = event_to_dict(observation)
+        assert action_dict['action'] == 'run' and action_dict['args']['command'] == 'ls'
+        assert (
+            observation_dict['observation'] == 'error'
+            and observation_dict['content'] == 'Non fatal error here to trigger loop'
+        )
+    last_event = event_to_dict(events[-1])
+    assert last_event['extras']['agent_state'] == 'error'
+    assert last_event['observation'] == 'agent_state_changed'
+
+    assert state.agent_state == AgentState.ERROR
+    assert state.last_error == 'AgentStuckInLoopError: Agent got stuck in a loop'
+
+
+@pytest.mark.asyncio
 async def test_max_iterations_extension(mock_agent_with_stats, mock_event_stream):
     # Test with headless_mode=False - should extend max_iterations
     mock_agent, conversation_stats, llm_registry = mock_agent_with_stats
@@ -786,8 +922,7 @@ async def test_reset_with_pending_action_existing_observation(
     # Add an existing observation to the history
     existing_obs = ErrorObservation(content='Previous error')
     existing_obs.tool_call_metadata = pending_action.tool_call_metadata
-    mock_event_stream.get_events.return_value = [existing_obs]
-    mock_event_stream.search_events.return_value = [existing_obs]
+    controller.state.history.append(existing_obs)
 
     # Call reset
     controller._reset()
@@ -1000,7 +1135,23 @@ async def test_notify_on_llm_retry(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'context_window_error',
+    [
+        ContextWindowExceededError(
+            message='prompt is too long: 233885 tokens > 200000 maximum',
+            model='',
+            llm_provider='',
+        ),
+        BadRequestError(
+            message='litellm.BadRequestError: OpenrouterException - This endpoint\'s maximum context length is 40960 tokens. However, you requested about 42988 tokens (38892 of text input, 4096 in the output). Please reduce the length of either one, or use the "middle-out" transform to compress your prompt automatically.',
+            model='openrouter/qwen/qwen3-30b-a3b',
+            llm_provider='openrouter',
+        ),
+    ],
+)
 async def test_context_window_exceeded_error_handling(
+    context_window_error,
     mock_agent_with_stats,
     mock_runtime,
     test_event_stream,
@@ -1009,7 +1160,6 @@ async def test_context_window_exceeded_error_handling(
     """Test that context window exceeded errors are handled correctly by the controller, providing a smaller view but keeping the history intact."""
     mock_agent, conversation_stats, llm_registry = mock_agent_with_stats
 
-    context_window_error = LLMContextWindowExceedError('Context limit')
     max_iterations = 5
     error_after = 2
 
@@ -1034,8 +1184,10 @@ async def test_context_window_exceeded_error_handling(
                 self.index += 1
                 return MessageAction(content=f'Test message {self.index}')
 
-            LLMContextWindowExceedError(
-                'prompt is too long: 233885 tokens > 200000 maximum'
+            ContextWindowExceededError(
+                message='prompt is too long: 233885 tokens > 200000 maximum',
+                model='',
+                llm_provider='',
             )
             self.has_errored = True
             raise context_window_error
@@ -1192,8 +1344,10 @@ async def test_run_controller_with_context_window_exceeded_with_truncation(
             # If the state has more than one message and we haven't errored yet,
             # throw the context window exceeded error
             if len(state.history) > 5 and not self.has_errored:
-                error = LLMContextWindowExceedError(
-                    'prompt is too long: 233885 tokens > 200000 maximum'
+                error = ContextWindowExceededError(
+                    message='prompt is too long: 233885 tokens > 200000 maximum',
+                    model='',
+                    llm_provider='',
                 )
                 self.has_errored = True
                 raise error
@@ -1273,8 +1427,10 @@ async def test_run_controller_with_context_window_exceeded_without_truncation(
             # If the state has more than one message and we haven't errored yet,
             # throw the context window exceeded error
             if len(state.history) > 3 and not self.has_errored:
-                error = LLMContextWindowExceedError(
-                    'prompt is too long: 233885 tokens > 200000 maximum'
+                error = ContextWindowExceededError(
+                    message='prompt is too long: 233885 tokens > 200000 maximum',
+                    model='',
+                    llm_provider='',
                 )
                 self.has_errored = True
                 raise error
@@ -1330,7 +1486,7 @@ async def test_run_controller_with_context_window_exceeded_without_truncation(
     assert state.agent_state == AgentState.ERROR
     assert (
         state.last_error
-        == 'LLMContextWindowExceedError: prompt is too long: 233885 tokens > 200000 maximum'
+        == 'LLMContextWindowExceedError: Conversation history longer than LLM context window limit. Consider turning on enable_history_truncation config to avoid this error'
     )
 
     error_observations = test_event_stream.get_matching_events(
@@ -1340,7 +1496,7 @@ async def test_run_controller_with_context_window_exceeded_without_truncation(
     error_observation = error_observations[0]
     assert (
         error_observation.reason
-        == 'LLMContextWindowExceedError: prompt is too long: 233885 tokens > 200000 maximum'
+        == 'LLMContextWindowExceedError: Conversation history longer than LLM context window limit. Consider turning on enable_history_truncation config to avoid this error'
     )
 
     # Check that the context window exceeded error was raised during the run
@@ -1698,29 +1854,83 @@ async def test_first_user_message_with_identical_content(
 async def test_agent_controller_processes_null_observation_with_cause(
     mock_agent_with_stats,
 ):
-    agent, stats, _ = mock_agent_with_stats
-    stream = EventStream(sid='null-observation', file_store=InMemoryFileStore())
+    """Test that AgentController processes NullObservation events with a cause value.
+
+    And that the agent's step method is called as a result.
+    """
+    mock_agent, conversation_stats, llm_registry = mock_agent_with_stats
+
+    # Create an in-memory file store and real event stream
+    file_store = InMemoryFileStore()
+    event_stream = EventStream(sid='test-session', file_store=file_store)
+
+    # Create a Memory instance - not used directly in this test but needed for setup
+    Memory(event_stream=event_stream, sid='test-session')
+
+    # Create a controller with the mock agent
     controller = AgentController(
-        agent=agent,
-        event_stream=stream,
-        conversation_stats=stats,
+        agent=mock_agent,
+        event_stream=event_stream,
+        conversation_stats=conversation_stats,
         iteration_delta=10,
-        sid='null-observation',
+        sid='test-session',
     )
-    controller.state.agent_state = AgentState.RUNNING
-    try:
-        with patch.object(controller, '_step', new_callable=AsyncMock) as step:
-            observation = NullObservation(content='Completed action')
-            observation._cause = 1
-            await controller._on_event(observation)
-            step.assert_awaited_once()
-            step.reset_mock()
-            observation._cause = 0
-            await controller._on_event(observation)
-            step.assert_not_awaited()
-    finally:
-        await controller.close()
-        stream.close()
+
+    # Patch the controller's step method to track calls
+    with patch.object(controller, '_step') as mock_step:
+        # Create and add the first user message (will have ID 0)
+        user_message = MessageAction(content='First user message')
+        user_message._source = EventSource.USER  # type: ignore[attr-defined]
+        event_stream.add_event(user_message, EventSource.USER)
+
+        # Give it a little time to process
+        await asyncio.sleep(1)
+
+        # Get all events from the stream
+        events = list(event_stream.get_events())
+
+        # Events in the stream:
+        # Event 0: MessageAction, ID: 0, Cause: None, Source: EventSource.USER, Content: First user message
+        # Event 1: RecallAction, ID: 1, Cause: None, Source: EventSource.USER, Content: N/A
+        # Event 2: NullObservation, ID: 2, Cause: 1, Source: EventSource.ENVIRONMENT, Content:
+        # Event 3: AgentStateChangedObservation, ID: 3, Cause: None, Source: EventSource.ENVIRONMENT, Content:
+
+        # Find the RecallAction event (should be automatically created)
+        recall_actions = [event for event in events if isinstance(event, RecallAction)]
+        assert len(recall_actions) > 0, 'No RecallAction was created'
+        recall_action = recall_actions[0]
+
+        # Find any NullObservation events
+        null_obs_events = [
+            event for event in events if isinstance(event, NullObservation)
+        ]
+        assert len(null_obs_events) > 0, 'No NullObservation was created'
+        null_observation = null_obs_events[0]
+
+        # Verify the NullObservation has a cause that points to the RecallAction
+        assert null_observation.cause is not None, 'NullObservation cause is None'
+        assert null_observation.cause == recall_action.id, (
+            f'Expected cause={recall_action.id}, got cause={null_observation.cause}'
+        )
+
+        # Verify the controller's should_step method returns True for this observation
+        assert controller.should_step(null_observation), (
+            'should_step should return True for this NullObservation'
+        )
+
+        # Verify the controller's step method was called
+        # This means the controller processed the NullObservation
+        assert mock_step.called, "Controller's step method was not called"
+
+        # Now test with a NullObservation that has cause=0
+        # Create a NullObservation with cause = 0 (pointing to the first user message)
+        null_observation_zero = NullObservation(content='Test observation with cause=0')
+        null_observation_zero._cause = 0  # type: ignore[attr-defined]
+
+        # Verify the controller's should_step method would return False for this observation
+        assert not controller.should_step(null_observation_zero), (
+            'should_step should return False for NullObservation with cause=0'
+        )
 
 
 def test_agent_controller_should_step_with_null_observation_cause_zero(

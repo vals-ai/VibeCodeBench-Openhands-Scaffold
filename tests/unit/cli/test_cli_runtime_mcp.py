@@ -24,7 +24,7 @@ class TestCLIRuntimeMCP:
         """Set up test fixtures."""
         self.config = OpenHandsConfig()
         self.event_stream = MagicMock()
-        llm_registry = MagicMock(spec=LLMRegistry)
+        llm_registry = LLMRegistry(config=OpenHandsConfig())
         self.runtime = CLIRuntime(
             config=self.config,
             event_stream=self.event_stream,

@@ -23,7 +23,15 @@ class MockRuntime(Runtime):
     def __init__(self, *args, **kwargs):
         # Ensure llm_registry is provided if not already in kwargs
         if 'llm_registry' not in kwargs and len(args) < 3:
-            kwargs['llm_registry'] = MagicMock(spec=LLMRegistry)
+            # Create a mock LLMRegistry if not provided
+            config = (
+                kwargs.get('config')
+                if 'config' in kwargs
+                else args[0]
+                if args
+                else OpenHandsConfig()
+            )
+            kwargs['llm_registry'] = LLMRegistry(config=config)
         super().__init__(*args, **kwargs)
         self.run_action_calls = []
         self._execute_shell_fn_git_handler = MagicMock(
@@ -93,7 +101,7 @@ def runtime(temp_dir):
     )
     file_store = get_file_store('local', temp_dir)
     event_stream = EventStream('abc', file_store)
-    llm_registry = MagicMock(spec=LLMRegistry)
+    llm_registry = LLMRegistry(config=config)
     runtime = MockRuntime(
         config=config,
         event_stream=event_stream,

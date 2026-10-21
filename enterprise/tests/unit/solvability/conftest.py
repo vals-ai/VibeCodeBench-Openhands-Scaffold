@@ -2,6 +2,7 @@
 Shared fixtures for all tests.
 """
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -12,8 +13,6 @@ from integrations.solvability.models.featurizer import (
     FeatureEmbedding,
     Featurizer,
 )
-from model_library.base import QueryResult, ToolCall
-from model_library.base.output.result import QueryResultMetadata
 from sklearn.ensemble import RandomForestClassifier
 
 from openhands.core.config import LLMConfig
@@ -44,13 +43,13 @@ def feature_embedding() -> FeatureEmbedding:
 
 
 @pytest.fixture
-def featurizer(mock_llm, features, monkeypatch) -> Featurizer:
+def featurizer(mock_llm, features) -> Featurizer:
     """
     Create a featurizer for testing.
 
     Mocks out any calls to LLM.completion
     """
-    monkeypatch.setattr(
+    pytest.MonkeyPatch().setattr(
         'integrations.solvability.models.featurizer.LLM',
         lambda *args, **kwargs: mock_llm,
     )
@@ -65,21 +64,17 @@ def featurizer(mock_llm, features, monkeypatch) -> Featurizer:
 
 
 @pytest.fixture
-def mock_completion_response() -> QueryResult:
-    return QueryResult(
-        tool_calls=[
-            ToolCall(
-                id='feature-call',
-                name='call_featurizer',
-                args={
-                    'feature1': True,
-                    'feature2': False,
-                    'feature3': True,
-                },
-            )
-        ],
-        metadata=QueryResultMetadata(in_tokens=10, out_tokens=5),
-    )
+def mock_completion_response() -> dict[str, Any]:
+    """Create a mock response for the feature sample model."""
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.tool_calls = [MagicMock()]
+    mock_response.choices[0].message.tool_calls[
+        0
+    ].function.arguments = '{"feature1": true, "feature2": false, "feature3": true}'
+    mock_response.usage.prompt_tokens = 10
+    mock_response.usage.completion_tokens = 5
+    return mock_response
 
 
 @pytest.fixture

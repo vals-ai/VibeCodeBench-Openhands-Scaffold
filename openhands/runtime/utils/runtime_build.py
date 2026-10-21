@@ -331,12 +331,7 @@ def get_hash_for_lock_files(base_image: str, enable_browser: bool = True) -> str
     # Only include enable_browser in hash when it's False for backward compatibility
     if not enable_browser:
         md5.update(str(enable_browser).encode())
-    for file in [
-        'pyproject.toml',
-        'poetry.lock',
-        'requirements-model-library.txt',
-        'requirements-overrides.txt',
-    ]:
+    for file in ['pyproject.toml', 'poetry.lock']:
         src = Path(openhands_source_dir, file)
         if not src.exists():
             src = Path(openhands_source_dir.parent, file)

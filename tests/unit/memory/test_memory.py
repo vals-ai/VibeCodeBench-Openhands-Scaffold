@@ -98,14 +98,8 @@ def mock_agent():
 
 
 @pytest.mark.asyncio
-async def test_memory_on_event_exception_handling(
-    memory, event_stream, mock_agent, monkeypatch
-):
+async def test_memory_on_event_exception_handling(memory, event_stream, mock_agent):
     """Test that exceptions in Memory.on_event are properly handled via status callback."""
-    monkeypatch.setattr(
-        'openhands.core.main.create_registry_and_conversation_stats',
-        lambda config, sid, user_id: (MagicMock(spec=LLMRegistry), MagicMock(), config),
-    )
     # Create a mock runtime
     runtime = MagicMock(spec=ActionExecutionClient)
     runtime.event_stream = event_stream
@@ -134,13 +128,9 @@ async def test_memory_on_event_exception_handling(
 
 @pytest.mark.asyncio
 async def test_memory_on_workspace_context_recall_exception_handling(
-    memory, event_stream, mock_agent, monkeypatch
+    memory, event_stream, mock_agent
 ):
     """Test that exceptions in Memory._on_workspace_context_recall are properly handled via status callback."""
-    monkeypatch.setattr(
-        'openhands.core.main.create_registry_and_conversation_stats',
-        lambda config, sid, user_id: (MagicMock(spec=LLMRegistry), MagicMock(), config),
-    )
     # Create a mock runtime
     runtime = MagicMock(spec=ActionExecutionClient)
     runtime.event_stream = event_stream

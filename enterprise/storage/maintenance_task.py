@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, DateTime, Integer, String, Text, text
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSON
-from sqlalchemy.orm import Mapped, mapped_column
 from storage.base import Base
 
 from openhands.utils.import_utils import get_impl
@@ -61,13 +60,13 @@ class MaintenanceTask(Base):  # type: ignore
     __tablename__ = 'maintenance_tasks'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    status: Mapped[MaintenanceTaskStatus] = mapped_column(
+    status = Column(
         SQLEnum(MaintenanceTaskStatus),
         nullable=False,
         default=MaintenanceTaskStatus.INACTIVE,
     )
-    processor_type: Mapped[str] = mapped_column(String, nullable=False)
-    processor_json: Mapped[str] = mapped_column(Text, nullable=False)
+    processor_type = Column(String, nullable=False)
+    processor_json = Column(Text, nullable=False)
     delay = Column(Integer, server_default='0')
     started_at = Column(DateTime, nullable=True)
     info = Column(JSON, nullable=True)

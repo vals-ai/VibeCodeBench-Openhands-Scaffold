@@ -8,7 +8,6 @@ import openhands.mcp.utils
 from openhands.core.config.mcp_config import MCPSSEServerConfig, MCPStdioServerConfig
 from openhands.events.action.mcp import MCPAction
 from openhands.events.observation.mcp import MCPObservation
-from openhands.mcp.tool import MCPClientTool
 
 
 @pytest.mark.asyncio
@@ -89,11 +88,14 @@ def test_convert_mcp_clients_to_tools():
     mock_client2 = MagicMock()
 
     # Create mock tools
-    mock_tool1 = MCPClientTool(name='tool1', inputSchema={'type': 'object'})
+    mock_tool1 = MagicMock()
+    mock_tool1.to_param.return_value = {'function': {'name': 'tool1'}}
 
-    mock_tool2 = MCPClientTool(name='tool2', inputSchema={'type': 'object'})
+    mock_tool2 = MagicMock()
+    mock_tool2.to_param.return_value = {'function': {'name': 'tool2'}}
 
-    mock_tool3 = MCPClientTool(name='tool3', inputSchema={'type': 'object'})
+    mock_tool3 = MagicMock()
+    mock_tool3.to_param.return_value = {'function': {'name': 'tool3'}}
 
     # Set up the clients with their tools
     mock_client1.tools = [mock_tool1, mock_tool2]
@@ -106,9 +108,9 @@ def test_convert_mcp_clients_to_tools():
 
     # Verify
     assert len(tools) == 3
-    assert tools[0].name == 'tool1'
-    assert tools[1].name == 'tool2'
-    assert tools[2].name == 'tool3'
+    assert tools[0] == {'function': {'name': 'tool1'}}
+    assert tools[1] == {'function': {'name': 'tool2'}}
+    assert tools[2] == {'function': {'name': 'tool3'}}
 
 
 @pytest.mark.asyncio
@@ -234,7 +236,8 @@ async def test_fetch_mcp_tools_from_config_with_stdio(mock_create_clients):
 
     # Setup mock clients
     mock_client = MagicMock()
-    mock_tool = MCPClientTool(name='stdio_tool', inputSchema={'type': 'object'})
+    mock_tool = MagicMock()
+    mock_tool.to_param.return_value = {'function': {'name': 'stdio_tool'}}
     mock_client.tools = [mock_tool]
     mock_create_clients.return_value = [mock_client]
 
@@ -250,7 +253,7 @@ async def test_fetch_mcp_tools_from_config_with_stdio(mock_create_clients):
 
     # Verify
     assert len(tools) == 1
-    assert tools[0].name == 'stdio_tool'
+    assert tools[0] == {'function': {'name': 'stdio_tool'}}
 
     # Verify create_mcp_clients was called with stdio servers
     mock_create_clients.assert_called_once_with(

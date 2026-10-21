@@ -17,33 +17,33 @@ from model_library.registry_utils import get_registry_model
 from openhands.core.config.llm_config import LLMConfig
 
 MILLION_TOKENS = 1000000
-T = TypeVar('T')
-
+T = TypeVar("T")
 
 def fetch_registry_model(llm_config: LLMConfig) -> LLM:
     try:
-        config_kwargs: dict[str, Any] = {'supports_batch': False}
+        config_kwargs: dict[str, Any] = {"supports_batch": False}
 
         if llm_config.max_output_tokens is not None:
-            config_kwargs['max_tokens'] = llm_config.max_output_tokens
+            config_kwargs["max_tokens"] = llm_config.max_output_tokens
 
         if llm_config.temperature is not None:
-            config_kwargs['temperature'] = llm_config.temperature
+            config_kwargs["temperature"] = llm_config.temperature
 
         if llm_config.top_p is not None:
-            config_kwargs['top_p'] = llm_config.top_p
+            config_kwargs["top_p"] = llm_config.top_p
 
         if llm_config.reasoning_effort is not None:
-            config_kwargs['reasoning_effort'] = llm_config.reasoning_effort
+            config_kwargs["reasoning_effort"] = llm_config.reasoning_effort
 
-        if 'xai' in llm_config.model.strip().lower():
-            config_kwargs['sync_client'] = True
+        if "xai" in llm_config.model.strip().lower():
+            config_kwargs["sync_client"] = True
 
         vals_llm_config = ValsLLMConfig(**config_kwargs)
 
         registry_model = get_registry_model(
             llm_config.model, override_config=vals_llm_config
         )
+
 
     except ValueError as e:
         raise ValueError(
@@ -60,6 +60,7 @@ class CostMetadata:
     def __init__(self, input_cost: float, output_cost: float) -> None:
         self.input_cost = input_cost
         self.output_cost = output_cost
+
 
 
 class PersistentEventLoopRunner:
@@ -99,4 +100,4 @@ class PersistentEventLoopRunner:
             return fut.result(timeout=timeout)
         except FutureTimeoutError as e:
             fut.cancel()
-            raise TimeoutError(f'Model query timed out after {timeout} seconds') from e
+            raise TimeoutError(f"Model query timed out after {timeout} seconds") from e
