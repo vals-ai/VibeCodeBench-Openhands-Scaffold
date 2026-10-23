@@ -348,6 +348,9 @@ RUN chmod a+rwx /openhands/code/openhands/__init__.py && \
 # END: Build from versioned image
 # ================================================================
 {% if build_from_versioned %}
+# Pick up distro ca-certificates updates (e.g. the eMudhra intermediate CA distrust) before base images refresh.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*
 {{ install_dependencies_user() }}
 {{ install_dependencies_root() }}
 {{ install_vscode_extensions() }}
