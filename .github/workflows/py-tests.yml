@@ -51,7 +51,7 @@ jobs:
         run: |
           poetry install --with dev,test,runtime
           poetry run pip install uv==0.12.5
-          poetry run uv pip install --exclude-newer "7 days" --overrides requirements-overrides.txt -r requirements-model-library.txt
+          poetry run uv pip install --exclude-newer "7 days" --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Build Environment
         run: make build
       - name: Run Unit Tests
@@ -92,7 +92,7 @@ jobs:
         run: |
           poetry install --with dev,test,runtime
           poetry run pip install uv==0.12.5
-          poetry run uv pip install --exclude-newer "7 days" --overrides requirements-overrides.txt -r requirements-model-library.txt
+          poetry run uv pip install --exclude-newer "7 days" --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Run Windows unit tests
         run: poetry run pytest -svv tests/unit/runtime/utils/test_windows_bash.py
         env:
@@ -124,7 +124,7 @@ jobs:
         run: |
           poetry install --with dev,test
           poetry run pip install uv==0.12.5
-          poetry run uv pip install --exclude-newer "7 days" --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
+          poetry run uv pip install --exclude-newer "7 days" --constraints ../requirements-security.txt --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
       - name: Run Unit Tests
         # Use base working directory for coverage paths to line up.
         run: PYTHONPATH=".:$PYTHONPATH" poetry run --project=enterprise pytest --forked -n auto -s -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark ./enterprise/tests/unit --cov=enterprise --cov-branch

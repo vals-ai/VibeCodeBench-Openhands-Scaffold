@@ -99,7 +99,7 @@ jobs:
       - name: Resolve aged dependencies and create requirements.txt
         run: |
           echo "openhands-ai" > /tmp/openhands-requirements.in
-          uv pip compile --exclude-newer "7 days" /tmp/openhands-requirements.in -o /tmp/requirements.txt
+          uv pip compile --exclude-newer "7 days" --constraints requirements-security.txt /tmp/openhands-requirements.in -o /tmp/requirements.txt
 
       - name: Cache pip dependencies
         if: |
@@ -229,11 +229,11 @@ jobs:
             if (isExperimentalLabel || isIssueCommentExperimental || isReviewCommentExperimental) {
               console.log("Installing experimental OpenHands...");
 
-              await exec.exec("uv pip install --system --exclude-newer '7 days' git+https://github.com/all-hands-ai/openhands.git");
+              await exec.exec("uv pip install --system --exclude-newer '7 days' --constraints requirements-security.txt git+https://github.com/all-hands-ai/openhands.git");
             } else {
               console.log("Installing from requirements.txt...");
 
-              await exec.exec("uv pip install --system --exclude-newer '7 days' -r /tmp/requirements.txt");
+              await exec.exec("uv pip install --system --exclude-newer '7 days' --constraints requirements-security.txt -r /tmp/requirements.txt");
             }
 
       - name: Attempt to resolve issue

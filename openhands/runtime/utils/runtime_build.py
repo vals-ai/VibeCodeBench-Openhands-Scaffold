@@ -293,6 +293,7 @@ def prep_build_folder(
         'poetry.lock',
         'requirements-model-library.txt',
         'requirements-overrides.txt',
+        'requirements-security.txt',
     ]:
         src = Path(openhands_source_dir, file)
         if not src.exists():
