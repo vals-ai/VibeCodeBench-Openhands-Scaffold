@@ -34,6 +34,8 @@ RUN uv pip install --exclude-newer "7 days" --exclude-newer-package certifi=fals
     --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
 
 FROM base AS openhands-app
+# Pick up distro ca-certificates updates (e.g. the eMudhra intermediate CA distrust) before base images refresh.
+RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
