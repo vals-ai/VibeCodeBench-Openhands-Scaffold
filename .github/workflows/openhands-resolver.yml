@@ -92,14 +92,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install aged uv
-        run: |
-          python -m pip install uv==0.12.5
+      - name: Install security-fixed uv
+        id: security-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
 
       - name: Resolve aged dependencies and create requirements.txt
         run: |
           echo "openhands-ai" > /tmp/openhands-requirements.in
-          uv pip compile --exclude-newer "7 days" --constraints requirements-security.txt /tmp/openhands-requirements.in -o /tmp/requirements.txt
+          "${{ steps.security-uv.outputs.uv-path }}" pip compile --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints requirements-security.txt /tmp/openhands-requirements.in -o /tmp/requirements.txt
 
       - name: Cache pip dependencies
         if: |

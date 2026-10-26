@@ -10,7 +10,7 @@ COPY frontend ./
 RUN npm run build
 
 FROM python:3.13.7-slim-trixie AS base
-COPY --from=ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /usr/local/bin/uv
 FROM base AS backend-builder
 
 WORKDIR /app
@@ -30,7 +30,7 @@ RUN touch README.md
 RUN export POETRY_CACHE_DIR && poetry install --no-root && rm -rf $POETRY_CACHE_DIR
 
 COPY requirements-model-library.txt requirements-overrides.txt requirements-security.txt ./
-RUN uv pip install --exclude-newer "7 days" --python /app/.venv/bin/python \
+RUN uv pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --python /app/.venv/bin/python \
     --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
 
 FROM base AS openhands-app

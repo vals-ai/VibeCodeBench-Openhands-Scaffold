@@ -1,2 +1,3 @@
 # Deny known malicious releases even after they age: https://github.com/advisories/GHSA-92x9-889m-jgmw
 litellm!=1.107.0,!=1.82.7,!=1.82.8
+certifi>=2026.10.19
