@@ -106,4 +106,5 @@ ignore_missing_imports = true
 # openhands-tools = { git = "https://github.com/All-Hands-AI/agent-sdk.git", subdirectory = "openhands-tools", rev = "512399d896521aee3131eea4bb59087fb9dfa243" }
 
 [tool.uv]
+exclude-newer = "7 days"
 constraint-dependencies = ["litellm!=1.107.0,!=1.82.7,!=1.82.8"]
