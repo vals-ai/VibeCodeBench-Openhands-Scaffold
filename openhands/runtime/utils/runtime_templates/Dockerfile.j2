@@ -363,10 +363,10 @@ RUN {{ extra_deps }}
 USER openhands
 RUN cd /openhands/code && \
     /openhands/micromamba/bin/micromamba run -n openhands pip install uv && \
-    /openhands/micromamba/bin/micromamba run -n openhands uv pip install --system \
+    /openhands/micromamba/bin/micromamba run -n openhands uv pip install --exclude-newer "7 days" --system \
         --overrides requirements-overrides.txt -r requirements-model-library.txt && \
     /openhands/micromamba/bin/micromamba run -n openhands poetry run pip install uv && \
-    /openhands/micromamba/bin/micromamba run -n openhands poetry run uv pip install \
+    /openhands/micromamba/bin/micromamba run -n openhands poetry run uv pip install --exclude-newer "7 days" \
         --overrides requirements-overrides.txt -r requirements-model-library.txt
 
 # Set up environment for openhands user

@@ -55,7 +55,7 @@ jobs:
       - name: Install dependencies
         working-directory: openhands-cli
         run: |
-          uv sync
+          uv sync --exclude-newer "7 days"
 
       - name: Build binary executable
         working-directory: openhands-cli

@@ -223,3 +223,6 @@ reportExplicitAny = false
 reportAny = false
 
 reportAttributeAccessIssue = "none"
+
+[tool.uv.pip]
+exclude-newer = "7 days"

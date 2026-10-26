@@ -12,11 +12,11 @@ help:
 
 # Install the package
 install:
-	uv sync
+	uv sync --exclude-newer "7 days"
 
 # Install with development dependencies
 install-dev:
-	uv sync --group dev
+	uv sync --exclude-newer "7 days" --group dev
 
 # Run tests
 test:
