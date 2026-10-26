@@ -47,11 +47,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "poetry"
+      - name: Install security-fixed uv
+        id: security-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime
-          poetry run pip install uv
-          poetry run uv pip install --overrides requirements-overrides.txt -r requirements-model-library.txt
+          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Build Environment
         run: make build
       - name: Run Unit Tests
@@ -88,11 +92,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "poetry"
+      - name: Install security-fixed uv
+        id: security-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime
-          poetry run pip install uv
-          poetry run uv pip install --overrides requirements-overrides.txt -r requirements-model-library.txt
+          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Run Windows unit tests
         run: poetry run pytest -svv tests/unit/runtime/utils/test_windows_bash.py
         env:
@@ -119,12 +127,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "poetry"
+      - name: Install security-fixed uv
+        id: security-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install Python dependencies using Poetry
         working-directory: ./enterprise
         run: |
           poetry install --with dev,test
-          poetry run pip install uv
-          poetry run uv pip install --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
+          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints ../requirements-security.txt --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
       - name: Run Unit Tests
         # Use base working directory for coverage paths to line up.
         run: PYTHONPATH=".:$PYTHONPATH" poetry run --project=enterprise pytest --forked -n auto -s -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark ./enterprise/tests/unit --cov=enterprise --cov-branch
@@ -158,12 +170,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
-          version: "latest"
+          version: "0.13.5"
 
       - name: Install dependencies
         working-directory: ./openhands-cli
         run: |
-          uv sync --group dev
+          uv sync --exclude-newer "7 days" --exclude-newer-package certifi=false --group dev
 
       - name: Run CLI unit tests
         working-directory: ./openhands-cli
@@ -171,7 +183,7 @@ jobs:
           # write coverage to repo root so the merge step finds it
           COVERAGE_FILE: "${{ github.workspace }}/.coverage.openhands-cli.${{ matrix.python-version }}"
         run: |
-          uv run pytest --forked -n auto -s \
+          uv run --exclude-newer "7 days" --exclude-newer-package certifi=false pytest --forked -n auto -s \
             -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark \
             tests --cov=openhands_cli --cov-branch
 

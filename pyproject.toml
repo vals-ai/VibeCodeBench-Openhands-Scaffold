@@ -19,6 +19,7 @@ packages = [
   { include = "poetry.lock", to = "openhands" },
   { include = "requirements-model-library.txt", to = "openhands" },
   { include = "requirements-overrides.txt", to = "openhands" },
+  { include = "requirements-security.txt", to = "openhands" },
 ]
 include = [
   "openhands/integrations/vscode/openhands-vscode-0.0.1.vsix",
@@ -223,3 +224,10 @@ reportExplicitAny = false
 reportAny = false
 
 reportAttributeAccessIssue = "none"
+
+[tool.uv]
+required-version = ">=0.13.5"
+exclude-newer-package = { certifi = false }
+
+[tool.uv.pip]
+exclude-newer = "7 days"

@@ -1,6 +1,8 @@
 FROM mambaorg/micromamba:debian12
 
 USER root
+# Pick up distro ca-certificates updates (e.g. the eMudhra intermediate CA distrust) before base images refresh.
+RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*
 # For https://github.com/OSU-NLP-Group/ScienceAgentBench/tree/main?tab=readme-ov-file#code-generation-with-agents
 
 RUN micromamba create -n sci-agent-eval python=3.10 pip setuptools wheel

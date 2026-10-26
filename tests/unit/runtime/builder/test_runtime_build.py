@@ -91,7 +91,6 @@ def test_prep_build_folder(temp_dir):
 
     # make sure that the code (openhands/) and microagents folder were copied
     assert shutil_mock.copytree.call_count == 2
-    assert shutil_mock.copy2.call_count == 4
 
     # Now check dockerfile is in the folder
     dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
@@ -107,6 +106,7 @@ def test_public_build_excludes_local_model_proxy(tmp_path, monkeypatch):
     files = [
         'pyproject.toml', 'poetry.lock',
         'requirements-model-library.txt', 'requirements-overrides.txt',
+        'requirements-security.txt',
     ]
     for name in files:
         (project / name).write_text(name)

@@ -10,6 +10,7 @@ COPY frontend ./
 RUN npm run build
 
 FROM python:3.13.7-slim-trixie AS base
+COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /usr/local/bin/uv
 FROM base AS backend-builder
 
 WORKDIR /app
@@ -28,11 +29,13 @@ COPY pyproject.toml poetry.lock ./
 RUN touch README.md
 RUN export POETRY_CACHE_DIR && poetry install --no-root && rm -rf $POETRY_CACHE_DIR
 
-COPY requirements-model-library.txt requirements-overrides.txt ./
-RUN pip install uv && uv pip install --python /app/.venv/bin/python \
-    --overrides requirements-overrides.txt -r requirements-model-library.txt
+COPY requirements-model-library.txt requirements-overrides.txt requirements-security.txt ./
+RUN uv pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --python /app/.venv/bin/python \
+    --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
 
 FROM base AS openhands-app
+# Pick up distro ca-certificates updates (e.g. the eMudhra intermediate CA distrust) before base images refresh.
+RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -81,7 +84,7 @@ COPY --chown=openhands:openhands --chmod=770 ./microagents ./microagents
 COPY --chown=openhands:openhands --chmod=770 ./openhands ./openhands
 COPY --chown=openhands:openhands --chmod=777 ./openhands/runtime/plugins ./openhands/runtime/plugins
 COPY --chown=openhands:openhands pyproject.toml poetry.lock README.md MANIFEST.in LICENSE ./
-COPY --chown=openhands:openhands requirements-model-library.txt requirements-overrides.txt ./
+COPY --chown=openhands:openhands requirements-model-library.txt requirements-overrides.txt requirements-security.txt ./
 
 # This is run as "openhands" user, and will create __pycache__ with openhands:openhands ownership
 RUN python openhands/core/download.py # No-op to download assets

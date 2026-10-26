@@ -59,14 +59,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
-          version: "latest"
+          version: "0.13.5"
 
       - name: Build CLI package
         working-directory: openhands-cli
         run: |
           # Clean dist directory to avoid conflicts with binary builds
           rm -rf dist/
-          uv build
+          uv build --exclude-newer "7 days" --exclude-newer-package certifi=false
 
       - name: Publish CLI to PyPI
         working-directory: openhands-cli

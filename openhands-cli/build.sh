@@ -7,6 +7,7 @@
 #
 
 set -e  # Exit on any error
+export UV_EXCLUDE_NEWER="7 days"
 
 echo "🚀 OpenHands CLI Build Script"
 echo "=============================="
