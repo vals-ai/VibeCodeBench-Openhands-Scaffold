@@ -1,4 +1,5 @@
 FROM {{ base_image }}
+COPY --from=ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 /uv /usr/local/bin/uv
 
 SHELL ["/bin/bash", "-c"]
 
@@ -362,11 +363,9 @@ RUN {{ extra_deps }}
 # Install the public model library in both Python environments.
 USER openhands
 RUN cd /openhands/code && \
-    /openhands/micromamba/bin/micromamba run -n openhands pip install uv && \
-    /openhands/micromamba/bin/micromamba run -n openhands uv pip install --exclude-newer "7 days" --system \
+    /openhands/micromamba/bin/micromamba run -n openhands /usr/local/bin/uv pip install --exclude-newer "7 days" --system \
         --overrides requirements-overrides.txt -r requirements-model-library.txt && \
-    /openhands/micromamba/bin/micromamba run -n openhands poetry run pip install uv && \
-    /openhands/micromamba/bin/micromamba run -n openhands poetry run uv pip install --exclude-newer "7 days" \
+    /openhands/micromamba/bin/micromamba run -n openhands poetry run /usr/local/bin/uv pip install --exclude-newer "7 days" \
         --overrides requirements-overrides.txt -r requirements-model-library.txt
 
 # Set up environment for openhands user
