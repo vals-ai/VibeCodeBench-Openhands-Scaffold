@@ -349,10 +349,12 @@ RUN chmod a+rwx /openhands/code/openhands/__init__.py && \
 # ================================================================
 # END: Build from versioned image
 # ================================================================
-{% if build_from_versioned %}
+{% if not build_from_scratch %}
 USER root
 RUN /openhands/bin/uv pip install --exclude-newer-package certifi=false --python /openhands/micromamba/envs/openhands/bin/python poetry==2.4.0 "certifi>=2026.10.19"
+{% endif %}
 
+{% if build_from_versioned %}
 # Pick up distro ca-certificates updates (e.g. the eMudhra intermediate CA distrust) before base images refresh.
 RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*
 {{ install_dependencies_user() }}
