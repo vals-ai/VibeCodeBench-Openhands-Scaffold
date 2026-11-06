@@ -44,8 +44,8 @@ install-uv:
 		echo "Installing UV..."; \
 		installer=$$(mktemp) || exit $$?; \
 		trap 'rm -f "$$installer"' EXIT; \
-		curl -LsSf https://astral.sh/uv/0.12.5/install.sh -o "$$installer" && \
-		printf '%s  %s\n' '504511fbbbd811aeaba6738abc79408956b6c7da0ca35437b3dcc24a41efc111' "$$installer" | shasum -a 256 -c - && \
+		curl -LsSf https://astral.sh/uv/0.13.5/install.sh -o "$$installer" && \
+		printf '%s  %s\n' '1c6e7f025499664633ac2dce43a210800510e9ef0625c52e034a8afdf8bf177a' "$$installer" | shasum -a 256 -c - && \
 		sh "$$installer"; \
 	else \
 		echo "UV is already installed"; \
