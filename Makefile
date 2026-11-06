@@ -154,7 +154,7 @@ install-python-dependencies:
 	else \
 		poetry install --with dev,test,runtime; \
 	fi
-	poetry run pip install uv==0.12.5
+	poetry run pip install uv==0.13.5
 	poetry run uv pip install --exclude-newer "7 days" --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
 	@if [ "${INSTALL_PLAYWRIGHT}" != "false" ] && [ "${INSTALL_PLAYWRIGHT}" != "0" ]; then \
 		if [ -f "/etc/manjaro-release" ]; then \
