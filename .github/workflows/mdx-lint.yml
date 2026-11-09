@@ -31,7 +31,7 @@ jobs:
 
       - name: Install MDX dependencies
         run: |
-          npm install @mdx-js/mdx@3 glob@10
+          npm install --before="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)" @mdx-js/mdx@3 glob@10
 
       - name: Validate MDX files
         run: |

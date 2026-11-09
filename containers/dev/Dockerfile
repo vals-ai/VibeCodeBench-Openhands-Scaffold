@@ -66,8 +66,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
 # Poetry >= 1.8
-RUN curl -fsSL https://install.python-poetry.org | python3.12 - \
-    && ln -s ~/.local/bin/poetry /usr/local/bin/poetry
+COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /usr/local/bin/uv
+RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --python python3.12 \
+        --exclude-newer "7 days" --exclude-newer-package certifi=false poetry==2.4.0
 
 #
 RUN <<EOF

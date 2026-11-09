@@ -40,18 +40,21 @@ jobs:
         uses: useblacksmith/setup-node@v5
         with:
           node-version: "22.x"
-      - name: Install poetry via pipx
-        run: pipx install poetry
-      - name: Set up Python
-        uses: useblacksmith/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "poetry"
       - name: Install security-fixed uv
         id: security-uv
         uses: astral-sh/setup-uv@v6
         with:
           version: "0.13.5"
+      - name: Install poetry
+        shell: bash
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false poetry==2.4.0
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Set up Python
+        uses: useblacksmith/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "poetry"
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime
@@ -83,20 +86,21 @@ jobs:
         python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
-      - name: Install pipx
-        run: pip install pipx
-      - name: Install poetry via pipx
-        run: pipx install poetry
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "poetry"
       - name: Install security-fixed uv
         id: security-uv
         uses: astral-sh/setup-uv@v6
         with:
           version: "0.13.5"
+      - name: Install poetry
+        shell: bash
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false poetry==2.4.0
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "poetry"
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime
@@ -120,18 +124,21 @@ jobs:
         python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
-      - name: Install poetry via pipx
-        run: pipx install poetry
-      - name: Set up Python
-        uses: useblacksmith/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "poetry"
       - name: Install security-fixed uv
         id: security-uv
         uses: astral-sh/setup-uv@v6
         with:
           version: "0.13.5"
+      - name: Install poetry
+        shell: bash
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false poetry==2.4.0
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Set up Python
+        uses: useblacksmith/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "poetry"
       - name: Install Python dependencies using Poetry
         working-directory: ./enterprise
         run: |

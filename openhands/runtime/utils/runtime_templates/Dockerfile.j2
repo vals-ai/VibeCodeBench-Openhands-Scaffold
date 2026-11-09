@@ -351,7 +351,11 @@ RUN chmod a+rwx /openhands/code/openhands/__init__.py && \
 # ================================================================
 {% if not build_from_scratch %}
 USER root
-RUN /openhands/bin/uv pip install --exclude-newer-package certifi=false --python /openhands/micromamba/envs/openhands/bin/python poetry==2.4.0 "certifi>=2026.10.19"
+RUN /openhands/bin/uv pip install --exclude-newer-package certifi=false --python /openhands/micromamba/envs/openhands/bin/python poetry==2.4.0 "certifi>=2026.10.19" && \
+    # Ubuntu-family scratch builds link a global corepack here; reinstall it so reused images carry an aged copy.
+    if command -v node >/dev/null 2>&1 && [ "$(readlink /usr/local/bin/corepack)" = "$(dirname "$(command -v node)")/corepack" ]; then \
+        npm install -g corepack --before="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)" && corepack enable yarn; \
+    fi
 {% endif %}
 
 {% if build_from_versioned %}
