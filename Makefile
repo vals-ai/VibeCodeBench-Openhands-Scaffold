@@ -143,11 +143,10 @@ install-python-dependencies:
 		export TZ="UTC"; \
 	fi
 	poetry env use python$(PYTHON_VERSION)
-	poetry run pip install uv==0.13.5
 	@if [ "$(shell uname)" = "Darwin" ]; then \
 		echo "$(BLUE)Installing chroma-hnswlib...$(RESET)"; \
 		export HNSWLIB_NO_NATIVE=1; \
-		poetry run uv pip install --exclude-newer "7 days" chroma-hnswlib; \
+		poetry run pip install chroma-hnswlib; \
 	fi
 	@if [ -n "${POETRY_GROUP}" ]; then \
 		echo "Installing only POETRY_GROUP=${POETRY_GROUP}"; \
@@ -155,11 +154,12 @@ install-python-dependencies:
 	else \
 		poetry install --with dev,test,runtime; \
 	fi
-	poetry run uv pip install --exclude-newer "7 days" --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
+	poetry run pip install uv==0.13.5
+	poetry run uv pip install --exclude-newer "7 days" --exclude-newer-package model-library=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
 	@if [ "${INSTALL_PLAYWRIGHT}" != "false" ] && [ "${INSTALL_PLAYWRIGHT}" != "0" ]; then \
 		if [ -f "/etc/manjaro-release" ]; then \
 			echo "$(BLUE)Detected Manjaro Linux. Installing Playwright dependencies...$(RESET)"; \
-			poetry run uv pip install --exclude-newer "7 days" playwright; \
+			poetry run pip install playwright; \
 			poetry run playwright install chromium; \
 		else \
 			if [ ! -f cache/playwright_chromium_is_installed.txt ]; then \
