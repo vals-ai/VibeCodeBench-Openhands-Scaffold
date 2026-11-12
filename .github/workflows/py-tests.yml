@@ -58,7 +58,7 @@ jobs:
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime
-          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
+          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --exclude-newer-package model-library=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Build Environment
         run: make build
       - name: Run Unit Tests
@@ -104,7 +104,7 @@ jobs:
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime
-          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
+          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --exclude-newer-package model-library=false --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
       - name: Run Windows unit tests
         run: poetry run pytest -svv tests/unit/runtime/utils/test_windows_bash.py
         env:
@@ -143,7 +143,7 @@ jobs:
         working-directory: ./enterprise
         run: |
           poetry install --with dev,test
-          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --constraints ../requirements-security.txt --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
+          poetry run "${{ steps.security-uv.outputs.uv-path }}" pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --exclude-newer-package model-library=false --constraints ../requirements-security.txt --overrides ../requirements-overrides.txt -r ../requirements-model-library.txt
       - name: Run Unit Tests
         # Use base working directory for coverage paths to line up.
         run: PYTHONPATH=".:$PYTHONPATH" poetry run --project=enterprise pytest --forked -n auto -s -p no:ddtrace -p no:ddtrace.pytest_bdd -p no:ddtrace.pytest_benchmark ./enterprise/tests/unit --cov=enterprise --cov-branch

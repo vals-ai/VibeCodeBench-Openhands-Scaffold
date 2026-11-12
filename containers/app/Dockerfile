@@ -31,7 +31,7 @@ RUN touch README.md
 RUN export POETRY_CACHE_DIR && poetry install --no-root && rm -rf $POETRY_CACHE_DIR
 
 COPY requirements-model-library.txt requirements-overrides.txt requirements-security.txt ./
-RUN uv pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --python /app/.venv/bin/python \
+RUN uv pip install --exclude-newer "7 days" --exclude-newer-package certifi=false --exclude-newer-package model-library=false --python /app/.venv/bin/python \
     --constraints requirements-security.txt --overrides requirements-overrides.txt -r requirements-model-library.txt
 
 FROM base AS openhands-app
