@@ -24,9 +24,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python packages with security fixes
-RUN pip install alembic psycopg2-binary cloud-sql-python-connector pg8000 gspread stripe python-keycloak asyncpg sqlalchemy[asyncio] resend tenacity slack-sdk ddtrace "posthog>=6.0.0" "limits==5.2.0" coredis prometheus-client shap scikit-learn pandas numpy && \
+COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /usr/local/bin/uv
+RUN uv pip install --python "$(command -v python)" --exclude-newer "7 days" --exclude-newer-package certifi=false alembic psycopg2-binary cloud-sql-python-connector pg8000 gspread stripe python-keycloak asyncpg sqlalchemy[asyncio] resend tenacity slack-sdk ddtrace "posthog>=6.0.0" "limits==5.2.0" coredis prometheus-client shap scikit-learn pandas numpy && \
     # Update packages with known CVE fixes
-    pip install --upgrade \
+    uv pip install --python "$(command -v python)" --exclude-newer "7 days" --exclude-newer-package certifi=false --upgrade \
         "mcp>=1.10.0" \
         "pillow>=11.3.0"
 

@@ -23,7 +23,8 @@ ENV POETRY_NO_INTERACTION=1 \
 
 RUN apt-get update -y \
     && apt-get install -y curl make git build-essential jq gettext \
-    && python3 -m pip install poetry --break-system-packages
+    && uv pip install --system --break-system-packages --exclude-newer "7 days" --exclude-newer-package certifi=false \
+        poetry==2.4.0 "certifi>=2026.10.19"
 
 COPY pyproject.toml poetry.lock ./
 RUN touch README.md

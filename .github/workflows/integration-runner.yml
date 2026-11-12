@@ -31,8 +31,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install poetry via pipx
-        run: pipx install poetry
+      - name: Install security-fixed uv
+        id: security-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - name: Install poetry
+        shell: bash
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false poetry==2.4.0
+          uv tool dir --bin >> "$GITHUB_PATH"
 
       - name: Set up Python
         uses: useblacksmith/setup-python@v6
@@ -53,11 +61,6 @@ jobs:
           comment: |
             Hi! I started running the integration tests on your PR. You will receive a comment with the results shortly.
 
-      - name: Install security-fixed uv
-        id: security-uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.13.5"
       - name: Install Python dependencies using Poetry
         run: |
           poetry install --with dev,test,runtime,evaluation

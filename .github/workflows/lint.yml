@@ -50,8 +50,14 @@ jobs:
         with:
           python-version: 3.12
           cache: "pip"
+      - name: Install security-fixed uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install pre-commit
-        run: pip install pre-commit==3.7.0
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false pre-commit==3.7.0
+          uv tool dir --bin >> "$GITHUB_PATH"
       - name: Run pre-commit hooks
         run: pre-commit run --all-files --show-diff-on-failure --config ./dev_config/python/.pre-commit-config.yaml
 
@@ -67,8 +73,14 @@ jobs:
         with:
           python-version: 3.12
           cache: "pip"
+      - name: Install security-fixed uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install pre-commit
-        run: pip install pre-commit==4.2.0
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false pre-commit==4.2.0
+          uv tool dir --bin >> "$GITHUB_PATH"
       - name: Run pre-commit hooks
         working-directory: ./enterprise
         run: pre-commit run --all-files --show-diff-on-failure --config ./dev_config/python/.pre-commit-config.yaml
@@ -85,8 +97,14 @@ jobs:
         with:
           python-version: 3.12
           cache: "pip"
+      - name: Install security-fixed uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install pre-commit
-        run: pip install pre-commit==4.2.0
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false pre-commit==4.2.0
+          uv tool dir --bin >> "$GITHUB_PATH"
       - name: Run pre-commit hooks
         working-directory: ./openhands-cli
         run: pre-commit run --all-files --config ./dev_config/python/.pre-commit-config.yaml

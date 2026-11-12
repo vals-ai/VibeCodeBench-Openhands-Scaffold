@@ -75,8 +75,14 @@ jobs:
         with:
           python-version: 3.12
           cache: "pip"
+      - name: Install security-fixed uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
       - name: Install pre-commit
-        run: pip install pre-commit==3.7.0
+        run: |
+          uv tool install --exclude-newer "7 days" --exclude-newer-package certifi=false pre-commit==3.7.0
+          uv tool dir --bin >> "$GITHUB_PATH"
       - name: Fix python lint issues
         run: |
           # Run all pre-commit hooks and continue even if they modify files (exit code 1)

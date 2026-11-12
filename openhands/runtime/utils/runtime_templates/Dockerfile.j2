@@ -5,6 +5,9 @@ SHELL ["/bin/bash", "-c"]
 
 # Shared environment variables
 ENV POETRY_VIRTUALENVS_PATH=/openhands/poetry \
+    POETRY_SOLVER_MIN_RELEASE_AGE=7 \
+    POETRY_SOLVER_MIN_RELEASE_AGE_EXCLUDE=certifi \
+    UV_EXCLUDE_NEWER="7 days" \
     MAMBA_ROOT_PREFIX=/openhands/micromamba \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -51,8 +54,7 @@ RUN apt-get update && \
 
 {% if (('ubuntu' in base_image) or ('mswebench' in base_image)) %}
 RUN ln -s "$(dirname $(which node))/corepack" /usr/local/bin/corepack && \
-    npm install -g corepack && corepack enable yarn && \
-    curl -fsSL --compressed https://install.python-poetry.org | python -
+    npm install -g corepack --before="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)" && corepack enable yarn
 {% endif %}
 
 # Add /openhands/bin to PATH
@@ -287,7 +289,8 @@ RUN mkdir -p /openhands/micromamba/bin && \
 
 # Create the openhands virtual environment and install poetry and python
 RUN /openhands/micromamba/bin/micromamba create -n openhands -y && \
-    /openhands/micromamba/bin/micromamba install -n openhands -c conda-forge poetry python=3.12 -y
+    /openhands/micromamba/bin/micromamba install -n openhands -c conda-forge python=3.12 -y && \
+    /openhands/bin/uv pip install --exclude-newer-package certifi=false --python /openhands/micromamba/envs/openhands/bin/python poetry==2.4.0 "certifi>=2026.10.19"
 
 # Create a clean openhands directory including only the pyproject.toml, poetry.lock and openhands/__init__.py
 RUN \
@@ -346,9 +349,17 @@ RUN chmod a+rwx /openhands/code/openhands/__init__.py && \
 # ================================================================
 # END: Build from versioned image
 # ================================================================
+{% if not build_from_scratch %}
+USER root
+RUN /openhands/bin/uv pip install --exclude-newer-package certifi=false --python /openhands/micromamba/envs/openhands/bin/python poetry==2.4.0 "certifi>=2026.10.19" && \
+    # Ubuntu-family scratch builds link a global corepack here; reinstall it so reused images carry an aged copy.
+    if command -v node >/dev/null 2>&1 && [ "$(readlink /usr/local/bin/corepack)" = "$(dirname "$(command -v node)")/corepack" ]; then \
+        npm install -g corepack --before="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)" && corepack enable yarn; \
+    fi
+{% endif %}
+
 {% if build_from_versioned %}
 # Pick up distro ca-certificates updates (e.g. the eMudhra intermediate CA distrust) before base images refresh.
-USER root
 RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*
 {{ install_dependencies_user() }}
 {{ install_dependencies_root() }}
